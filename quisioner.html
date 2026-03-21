@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quisioner Layanan - Komputasi DTSL</title>
+
+    <!-- Custom Favicon -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+
+    <!-- Bootstrap 5.3 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;600;700&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #0d6efd;
+            --bg-body: #f8fafc;
+            --border-color: #e2e8f0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-body);
+            color: #1e293b;
+            padding: 2rem 0;
+        }
+
+        h1,
+        h2,
+        h3,
+        h4,
+        .outfit {
+            font-family: 'Outfit', sans-serif;
+        }
+
+        .document-container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: #ffffff;
+            border: 2px solid #000;
+            padding: 0;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Header Table Style (Lampiran 3) */
+        .doc-header {
+            display: flex;
+            border-bottom: 2px solid #000;
+        }
+
+        .header-logo {
+            padding: 1rem;
+            border-right: 2px solid #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 150px;
+        }
+
+        .header-title {
+            flex-grow: 1;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-right: 2px solid #000;
+            text-align: center;
+        }
+
+        .header-meta {
+            width: 250px;
+            font-size: 0.75rem;
+        }
+
+        .meta-row {
+            display: flex;
+            border-bottom: 1px solid #000;
+        }
+
+        .meta-row:last-child {
+            border-bottom: none;
+        }
+
+        .meta-label {
+            width: 100px;
+            padding: 0.5rem;
+            border-right: 1px solid #000;
+            font-weight: 600;
+        }
+
+        .meta-value {
+            padding: 0.5rem;
+            flex-grow: 1;
+        }
+
+        .doc-body {
+            padding: 3rem;
+        }
+
+        .intro-text {
+            border: 1px solid #000;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        /* Interactive Slider Styles */
+        .rating-card {
+            border: 1px solid #000;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .rating-card:hover {
+            background-color: #fafafa;
+        }
+
+        .rating-label {
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: block;
+            font-size: 1.05rem;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .form-range {
+            height: 1rem;
+            padding: 0;
+            background: #e2e8f0;
+            border-radius: 1rem;
+            flex-grow: 1;
+        }
+
+        .emoji-display {
+            font-size: 2.5rem;
+            width: 60px;
+            text-align: center;
+            user-select: none;
+        }
+
+        @keyframes emojiPop {
+            0% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.4);
+            }
+
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        .emoji-display.bounce {
+            animation: emojiPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .rating-text {
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-top: 0.5rem;
+        }
+
+        .saran-box {
+            border: 1px solid #000;
+            width: 100%;
+            padding: 1rem;
+            min-height: 120px;
+            font-family: inherit;
+        }
+
+        #success-message {
+            display: none;
+            padding: 4rem 2rem;
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            .doc-body {
+                padding: 1.5rem;
+            }
+
+            .slider-container {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+
+            .emoji-display {
+                font-size: 3rem;
+                order: -1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="document-container">
+            <!-- Header Lampiran 3 -->
+            <div class="doc-header">
+                <div class="header-logo">
+                    <img id="app-logo" src="" alt="UGM Logo" style="max-height: 70px;">
+                </div>
+                <div class="header-title">
+                    <div class="fw-bold h5 mb-2 outfit">LAMPIRAN 3</div>
+                    <div class="fw-bold outfit">Quesioner Pelaksanaan<br>Pelayanan Laboratorium Komputasi</div>
+                </div>
+                <div class="header-meta">
+                    <div class="meta-row">
+                        <div class="meta-label">No. Dokumen</div>
+                        <div class="meta-value">WI-UGM-TKS-LS-14-50</div>
+                    </div>
+                    <div class="meta-row">
+                        <div class="meta-label">Mulai berlaku</div>
+                        <div class="meta-value">11 Februari 2014</div>
+                    </div>
+                    <div class="meta-row">
+                        <div class="meta-label">Revisi / Hal</div>
+                        <div class="meta-value">00 / 1 dari 1</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="doc-body" id="form-body">
+                <div class="intro-text">
+                    Terimakasih atas kegiatan TA/Tesis/Penelitian yang telah dilaksanakan di Laboratorium Komputasi,
+                    berikut ini adalah quesioner mengenai proses pelayanan TA/Tesis/Penelitian.<br>
+                    <strong>Mohon partisipasinya untuk perbaikan pelayanan kami kedepannya.</strong>
+                </div>
+
+                <form id="quisioner-form">
+                    <input type="hidden" name="requestId" id="requestId">
+
+                    <div id="rating-cards-container">
+                        <!-- Rating cards will be injected here for maintainability or hardcoded for speed -->
+                        <div class="rating-card" data-id="komputer">
+                            <label class="rating-label">1. Bagaimanakah menurut anda peralatan komputer yang
+                                digunakan</label>
+                            <div class="slider-container">
+                                <span class="emoji-display" id="emoji-komputer">😐</span>
+                                <input type="range" name="komputer" class="form-range rating-slider" min="1" max="5"
+                                    step="1" value="3">
+                                <div class="rating-text" id="text-komputer">Cukup</div>
+                            </div>
+                        </div>
+
+                        <div class="rating-card" data-id="fasilitas">
+                            <label class="rating-label">2. Bagaimanakah menurut anda kesiapan fasilitas pendukung yang
+                                digunakan</label>
+                            <div class="slider-container">
+                                <span class="emoji-display" id="emoji-fasilitas">😐</span>
+                                <input type="range" name="fasilitas" class="form-range rating-slider" min="1" max="5"
+                                    step="1" value="3">
+                                <div class="rating-text" id="text-fasilitas">Cukup</div>
+                            </div>
+                        </div>
+
+                        <div class="rating-card" data-id="kebersihan">
+                            <label class="rating-label">3. Bagaimanakah menurut anda kebersihan ruang yang
+                                dipergunakan</label>
+                            <div class="slider-container">
+                                <span class="emoji-display" id="emoji-kebersihan">😐</span>
+                                <input type="range" name="kebersihan" class="form-range rating-slider" min="1" max="5"
+                                    step="1" value="3">
+                                <div class="rating-text" id="text-kebersihan">Cukup</div>
+                            </div>
+                        </div>
+
+                        <div class="rating-card" data-id="administrasi">
+                            <label class="rating-label">4. Bagaimanakah menurut anda pelayanan administrasi yang
+                                diberikan</label>
+                            <div class="slider-container">
+                                <span class="emoji-display" id="emoji-administrasi">😐</span>
+                                <input type="range" name="administrasi" class="form-range rating-slider" min="1" max="5"
+                                    step="1" value="3">
+                                <div class="rating-text" id="text-administrasi">Cukup</div>
+                            </div>
+                        </div>
+
+                        <div class="rating-card" data-id="software">
+                            <label class="rating-label">5. Bagaimanakah menurut anda stabilitas & kelengkapan software
+                                yang disediakan</label>
+                            <div class="slider-container">
+                                <span class="emoji-display" id="emoji-software">😐</span>
+                                <input type="range" name="software" class="form-range rating-slider" min="1" max="5"
+                                    step="1" value="3">
+                                <div class="rating-text" id="text-software">Cukup</div>
+                            </div>
+                        </div>
+
+                        <div class="rating-card" data-id="web_portal">
+                            <label class="rating-label">6. Bagaimanakah menurut anda kemudahan penggunaan Portal Web
+                                Komputasi ini</label>
+                            <div class="slider-container">
+                                <span class="emoji-display" id="emoji-web_portal">😐</span>
+                                <input type="range" name="web_portal" class="form-range rating-slider" min="1" max="5"
+                                    step="1" value="3">
+                                <div class="rating-text" id="text-web_portal">Cukup</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="fw-bold outfit mb-2" for="saran">Saran / Masukan:</label>
+                        <textarea id="saran" name="saran" class="saran-box form-control"
+                            placeholder="Tuliskan kritik atau saran anda di sini..."></textarea>
+                    </div>
+
+                    <div class="text-center">
+                        <button type="submit" id="submit-btn"
+                            class="btn btn-primary btn-lg px-5 rounded-pill outfit fw-bold">Kirim Quisioner</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Success Overlay -->
+            <div id="success-message">
+                <div class="display-1 text-success mb-4">✅</div>
+                <h2 class="outfit fw-bold">Terima Kasih!</h2>
+                <p class="text-muted lead">Jawaban quisioner anda telah berhasil disimpan dan akan kami jadikan bahan
+                    evaluasi pelayanan.</p>
+                <div class="mt-4">
+                    <a href="index.html" class="btn btn-outline-primary rounded-pill px-4">Kembali ke Beranda</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div aria-live="polite" aria-atomic="true" class="position-relative">
+        <div class="toast-container position-fixed top-0 end-0 p-3" id="toast-container" style="z-index: 1060">
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <!-- Bootstrap JS (Required for Toasts/Modals) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/config.js?v=20.0"></script>
+    <script src="js/ui-helper.js?v=20.0"></script>
+    <script src="js/api-client.js?v=20.0"></script>
+    <script src="js/quisioner.js?v=20.0"></script>
+</body>
+
+</html>

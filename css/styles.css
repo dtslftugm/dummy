@@ -1,0 +1,480 @@
+/* Layanan Komputasi DTSL - Complete Stylesheet (v17.2) */
+
+/* 1. VARIABEL WARNA (TEMA) */
+:root {
+  /* --- DARK MODE (DEFAULT) --- */
+  --bg-body: #121212;
+  --bg-container: #1e1e1e;
+  --bg-input: #2c2c2c;
+  --bg-input-transparent: rgba(44, 44, 44, 0.8);
+  --bg-input-disabled: #3a3a3a;
+  --text-main: #e0e0e0;
+  --text-muted: #b0b0b0;
+  --border-color: #444;
+  --primary-color: #0d6efd;
+  --secondary: #adb5bd;
+  --info-text: #0dcaf0;
+  --card-header-bg: #2c2c2c;
+  --accent-success: #2ecc71;
+  --accent-success-bg: rgba(46, 204, 113, 0.15);
+  --card-bg: #242424;
+  --select2-dropdown: #2c2c2c;
+}
+
+body.light-mode {
+  /* --- LIGHT MODE OVERRIDE --- */
+  --bg-body: #f0f2f5;
+  --bg-container: #ffffff;
+  --bg-input: #ffffff;
+  --bg-input-transparent: rgba(255, 255, 255, 0.8);
+  --bg-input-disabled: #e9ecef;
+  --text-main: #212529;
+  --text-muted: #6c757d;
+  --border-color: #ced4da;
+  --primary-color: #0d6efd;
+  --secondary: #6c757d;
+  --info-text: #055160;
+  --card-header-bg: #f8f9fa;
+  --accent-success: #198754;
+  --accent-success-bg: rgba(25, 135, 84, 0.1);
+  --card-bg: #ffffff;
+  --select2-dropdown: #ffffff;
+}
+
+/* 2. LAYOUT DASAR & TYPOGRAPHY */
+body {
+  background-color: var(--bg-body);
+  color: var(--text-main);
+  padding-top: 20px;
+  padding-bottom: 20px;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+.container {
+  background-color: var(--bg-container);
+  padding: 30px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+a {
+  color: var(--primary-color) !important;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.text-muted {
+  color: var(--text-muted) !important;
+}
+
+#loading-spinner {
+  margin-right: 8px;
+}
+
+/* 3. FORM INPUTS & CARDS */
+.form-control,
+.form-select {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+}
+
+.form-control::placeholder {
+  color: var(--text-muted);
+}
+
+.form-control:focus,
+.form-select:focus {
+  background-color: var(--bg-input);
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+  color: var(--text-main);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  background-color: var(--bg-input-disabled) !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border-color) !important;
+  opacity: 1 !important;
+  cursor: not-allowed;
+}
+
+.form-label,
+.form-check-label {
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+.required-label::after {
+  content: " *";
+  color: #dc3545;
+}
+
+.card {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+}
+
+.card-header {
+  background-color: var(--card-header-bg);
+  color: var(--text-main);
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* 4. COMPONENT: SELECTION CARDS (Opsi Kotak) */
+.btn-check {
+  position: absolute;
+  clip: rect(0, 0, 0, 0);
+  pointer-events: none;
+}
+
+.selection-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 15px;
+  background-color: var(--bg-input);
+  border: 2px solid var(--border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  position: relative;
+}
+
+.card-title-text {
+  color: var(--text-main) !important;
+  transition: color 0.2s;
+}
+
+.selection-card .text-muted {
+  color: var(--text-muted) !important;
+}
+
+.selection-card:hover {
+  border-color: var(--text-muted);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.btn-check:checked+.selection-card {
+  border-color: var(--primary-color);
+  background-color: rgba(13, 110, 253, 0.15);
+  box-shadow: 0 0 0 1px var(--primary-color);
+}
+
+.btn-check:checked+.selection-card .card-title-text {
+  color: var(--text-main) !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.selection-card::after {
+  content: "✔";
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: var(--primary-color);
+  opacity: 0;
+  transform: scale(0);
+  transition: all 0.2s;
+}
+
+.btn-check:checked+.selection-card::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* 5. COMPONENT: SELECT2 (DROPDOWN SEARCH) */
+.select2-container .select2-selection--single,
+.select2-container .select2-selection--multiple {
+  background-color: var(--bg-input) !important;
+  border: 1px solid var(--border-color) !important;
+  min-height: 42px !important;
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+.select2-container .select2-selection--multiple .select2-selection__choice {
+  background-color: var(--primary-color) !important;
+  border: 1px solid var(--primary-color) !important;
+  color: #fff !important;
+  height: 26px !important;
+  line-height: 24px !important;
+  margin: 2px 4px 2px 0px !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.select2-container .select2-selection--multiple .select2-selection__choice__remove {
+  color: #fff !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.3) !important;
+  margin-right: 6px !important;
+  padding-right: 6px !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.select2-container .select2-search--inline {
+  flex: 1 1 auto !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.select2-container .select2-search--inline .select2-search__field {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background-color: transparent !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  height: 26px !important;
+  line-height: 26px !important;
+  vertical-align: middle !important;
+  color: var(--text-main) !important;
+  font-family: inherit !important;
+  font-size: 1rem !important;
+  min-width: 150px !important;
+}
+
+.select2-dropdown {
+  background-color: var(--select2-dropdown) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-main) !important;
+  z-index: 9999 !important;
+}
+
+.select2-results__option--highlighted[aria-selected] {
+  background-color: var(--primary-color) !important;
+  color: #fff !important;
+}
+
+.select2-results__option[aria-selected=true] {
+  background-color: var(--bg-input-disabled) !important;
+  color: var(--text-main) !important;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__rendered {
+  color: var(--text-main) !important;
+  line-height: 36px !important;
+  padding-left: 12px !important;
+  padding-right: 30px !important;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__clear {
+  position: absolute !important;
+  right: 30px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  color: var(--text-muted) !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__arrow {
+  height: 36px !important;
+  position: absolute !important;
+  top: 1px !important;
+  right: 1px !important;
+  width: 20px !important;
+}
+
+.select2-results__option {
+  color: var(--text-main) !important;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__placeholder {
+  color: var(--text-muted) !important;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__arrow b {
+  border-color: var(--text-muted) transparent transparent transparent !important;
+}
+
+/* 6. COMPONENT: FLOATING THEME BUTTON */
+#theme-toggle {
+  transition: all 0.3s ease;
+  border-width: 2px;
+  color: var(--text-main) !important;
+  border-color: var(--text-main) !important;
+}
+
+#theme-toggle:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.3) !important;
+  background-color: var(--text-main) !important;
+  color: var(--bg-body) !important;
+  border-color: var(--text-main) !important;
+}
+
+/* 7. COMPONENT: COMPUTER CARDS */
+.computer-card {
+  background-color: var(--card-bg) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-main) !important;
+}
+
+.computer-card .card-title {
+  color: var(--text-main) !important;
+}
+
+.computer-card .card-text {
+  color: var(--text-main) !important;
+  opacity: 0.9;
+}
+
+.computer-card strong {
+  color: var(--primary-color) !important;
+}
+
+.computer-card.selected {
+  border: 2px solid #198754 !important;
+  background-color: rgba(25, 135, 84, 0.15) !important;
+}
+
+/* 8. COMPONENT: SELECTED COMPUTER DETAILS */
+.selected-info-list {
+  padding: 15px;
+  background-color: var(--bg-input-transparent);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+
+.selected-info-item {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  padding: 8px 0;
+}
+
+.selected-info-item:last-child {
+  border-bottom: none;
+}
+
+.selected-info-label {
+  width: 150px;
+  font-weight: bold;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.selected-info-value {
+  flex: 1;
+  color: var(--text-main);
+  opacity: 0.95;
+}
+
+/* 9. PAGINATION */
+#prevPageBtn {
+  border-top-left-radius: 50px !important;
+  border-bottom-left-radius: 50px !important;
+  padding-left: 25px !important;
+}
+
+#nextPageBtn {
+  border-top-right-radius: 50px !important;
+  border-bottom-right-radius: 50px !important;
+  padding-right: 25px !important;
+}
+
+#pageIndicator {
+  border-left: none !important;
+  border-right: none !important;
+  min-width: 120px;
+  background-color: transparent !important;
+}
+
+.pagination-pill {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-radius: 50px;
+  overflow: visible;
+}
+
+/* 10. LOADING OVERLAY */
+#loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: none;
+  z-index: 9999;
+}
+
+#loading-overlay.active {
+  display: flex;
+}
+
+/* 11. CUSTOM MODALS (Theme Aware) */
+.modal-content {
+  background-color: var(--bg-container) !important;
+  color: var(--text-main) !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+}
+
+.modal-header,
+.modal-footer {
+  border-color: var(--border-color) !important;
+  background-color: transparent !important;
+}
+
+.modal-header.bg-success,
+.modal-header.bg-danger,
+.modal-header.bg-warning,
+.modal-header.bg-info {
+  background-color: unset !important;
+  /* Let Bootstrap handle or use specific colors */
+}
+
+/* Ensure success modal header remains green but visible */
+#success-modal .modal-header.bg-success {
+  background-color: var(--accent-success) !important;
+  color: #fff !important;
+}
+
+.modal-header .btn-close {
+  filter: none;
+}
+
+/* Invert close button in dark mode only if it's not a white button already */
+body:not(.light-mode) .modal-header .btn-close:not(.btn-close-white) {
+  filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+/* Specific fix for white content background bug */
+.modal-body {
+  color: inherit !important;
+}
+/* 12. ANIMATIONS & VALIDATION */
+.invalid-selection {
+  border-color: #dc3545 !important;
+  box-shadow: 0 0 0 0.25rem rgba(220, 53, 69, 0.25) !important;
+  animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+@keyframes shake {
+  10%, 90% { transform: translate3d(-1px, 0, 0); }
+  20%, 80% { transform: translate3d(2px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+  40%, 60% { transform: translate3d(4px, 0, 0); }
+}
+
+/* Highlight for Select2 validation */
+.invalid-select2 + .select2-container .select2-selection {
+  border-color: #dc3545 !important;
+  box-shadow: 0 0 0 0.25rem rgba(220, 53, 69, 0.25) !important;
+}
