@@ -12,12 +12,21 @@ $cpu = (Get-WmiObject Win32_Processor).Name | Out-String
 $ram = [math]::Round((Get-WmiObject Win32_OperatingSystem).TotalVisibleMemorySize / 1MB, 2)
 $disk = [math]::Round((Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DeviceID -eq "C:" }).FreeSpace / 1GB, 2)
 
-# --- GET NETWORK INFO (ACTIVE ADAPTER) ---
-$activeNet = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" } | Select-Object -First 1
-$ipAddress = if ($activeNet) { $activeNet.IPAddress } else { "N/A" }
-
-$macAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1
-$macAddress = if ($macAdapter) { $macAdapter.MacAddress } else { "N/A" }
+# --- GET NETWORK INFO (ACTIVE ADAPTER Preferred) ---
+# Picking the IP associated with the default gateway to avoid 169.254.x.x (APIPA)
+$activeRoute = Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Sort-Object RouteMetric | Select-Object -First 1
+if ($activeRoute) {
+    $activeNet = Get-NetIPAddress -InterfaceIndex $activeRoute.InterfaceIndex -AddressFamily IPv4 | Select-Object -First 1
+    $ipAddress = $activeNet.IPAddress
+    $macAdapter = Get-NetAdapter -InterfaceIndex $activeRoute.InterfaceIndex
+    $macAddress = $macAdapter.MacAddress
+} else {
+    # Fallback if no gateway found (e.g. local lab network without internet)
+    $activeNet = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike "169.254.*" -and $_.InterfaceAlias -notlike "*Loopback*" } | Select-Object -First 1
+    $ipAddress = if ($activeNet) { $activeNet.IPAddress } else { "N/A" }
+    $macAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1
+    $macAddress = if ($macAdapter) { $macAdapter.MacAddress } else { "N/A" }
+}
 
 # --- GET USER PROFILES (From C:\Users, excluding system/public) ---
 $profiles = (Get-ChildItem -Path C:\Users -Directory | Where-Object { $_.Name -notmatch "Public|Default|All Users" }).Name -join ", "
