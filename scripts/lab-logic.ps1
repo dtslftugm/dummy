@@ -19,8 +19,8 @@ $ipAddress = if ($activeNet) { $activeNet.IPAddress } else { "N/A" }
 $macAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1
 $macAddress = if ($macAdapter) { $macAdapter.MacAddress } else { "N/A" }
 
-# --- GET LOGGED IN USERS ---
-$users = (Get-WmiObject Win32_LoggedOnUser | Select-Object -Unique Anticedent).Anticedent.Name -join ", "
+# --- GET USER PROFILES (From C:\Users, excluding system/public) ---
+$profiles = (Get-ChildItem -Path C:\Users -Directory | Where-Object { $_.Name -notmatch "Public|Default|All Users" }).Name -join ", "
 
 # --- PREPARE PAYLOAD ---
 $payload = @{
@@ -31,7 +31,7 @@ $payload = @{
     cpu        = $cpu.Trim()
     ram        = "$ram GB"
     disk       = "$disk GB Free"
-    users      = $users
+    users      = $profiles
     workStatus = "Active"
 } | ConvertTo-Json
 
