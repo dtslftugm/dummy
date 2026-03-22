@@ -10,7 +10,10 @@ $hostname = $env:COMPUTERNAME
 # --- GET HARDWARE INFO ---
 $cpu = (Get-WmiObject Win32_Processor).Name | Out-String
 $ram = [math]::Round((Get-WmiObject Win32_OperatingSystem).TotalVisibleMemorySize / 1MB, 2)
-$disk = [math]::Round((Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DeviceID -eq "C:" }).FreeSpace / 1GB, 2)
+
+$cDrive = Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DeviceID -eq "C:" }
+$freeGB = [math]::Round($cDrive.FreeSpace / 1GB, 2)
+$percentFree = [math]::Round(($cDrive.FreeSpace / $cDrive.Size) * 100, 2)
 
 # --- GET NETWORK INFO (ACTIVE ADAPTER Preferred) ---
 # Picking the IP associated with the default gateway to avoid 169.254.x.x (APIPA)
@@ -27,6 +30,19 @@ if ($activeRoute) {
     $macAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1
     $macAddress = if ($macAdapter) { $macAdapter.MacAddress } else { "N/A" }
 }
+# --- CHECK PENDING REBOOT (Windows Update & Others) ---
+$isRebootPending = $false
+$regPaths = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
+)
+foreach ($path in $regPaths) { if (Test-Path $path) { $isRebootPending = $true } }
+
+$alerts = @()
+if ($isRebootPending) { $alerts += "Reboot Required" }
+if ($percentFree -lt 13) { $alerts += "Low Disk: $percentFree%" }
+
+$workStatus = if ($alerts.Count -gt 0) { "Active (" + ($alerts -join ", ") + ")" } else { "Active" }
 
 # --- GET USER PROFILES (From C:\Users, excluding system/public) ---
 $profiles = (Get-ChildItem -Path C:\Users -Directory | Where-Object { $_.Name -notmatch "Public|Default|All Users" }).Name -join ", "
@@ -39,9 +55,9 @@ $payload = @{
     macAddress = $macAddress
     cpu        = $cpu.Trim()
     ram        = "$ram GB"
-    disk       = "$disk GB Free"
+    disk       = "$freeGB GB Free ($percentFree%)"
     users      = $profiles
-    workStatus = "Active"
+    workStatus = $workStatus
 } | ConvertTo-Json
 
 # --- SEND HEARTBEAT ---
