@@ -1,15 +1,19 @@
 # ======================================================================
-# SCRIPT: lab-logic.ps1 (Update 2026-03-24 - Dual Sync Edition)
-# FUNGSI: Mengirimkan heartbeat ke Gateway Lokal (LAN) & GAS API (Cloud)
+# SCRIPT: lab-logic.ps1 (Update 2026-03-24 - Final Robust Edition)
+# FUNGSI: Heartbeat, Inventory, & Command Execution via Local Gateway/Cloud
 # ======================================================================
 
 # --- CONFIGURATION ---
 $gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec" 
-$localGatewayUrl = "http://10.47.106.9:5000/inventory" # IP Gateway Lokal di Lab
+$localGatewayUrl = "http://10.47.106.9:5000/inventory"
 $hostname = $env:COMPUTERNAME
 $hashFile = "C:\Users\Public\Documents\DTSL\dtsl_sw_hash.txt"
+$logPath = "C:\Users\Public\Documents\DTSL\command_log.txt"
 
-# --- GET HARDWARE INFO (CIM Mode - Faster) ---
+# Ensure log directory exists
+if (!(Test-Path "C:\Users\Public\Documents\DTSL")) { New-Item -ItemType Directory -Path "C:\Users\Public\Documents\DTSL" -Force }
+
+# --- GET HARDWARE INFO ---
 $cs = Get-CimInstance Win32_ComputerSystem
 $os = Get-CimInstance Win32_OperatingSystem
 $proc = Get-CimInstance Win32_Processor
@@ -18,8 +22,6 @@ $memArray = Get-CimInstance Win32_PhysicalMemoryArray
 $memSum = (Get-CimInstance Win32_PhysicalMemory | Measure-Object Capacity -Sum).Sum / 1GB
 $csp = Get-CimInstance Win32_ComputerSystemProduct
 $chassis = Get-CimInstance Win32_SystemEnclosure
-
-# Chassis Type Mapping
 $chassisMap = @{ 3="Desktop"; 4="Low Profile Desktop"; 8="Portable"; 9="Laptop"; 10="Notebook"; 13="All in One" }
 $systemType = if ($chassis.ChassisTypes[0]) { $chassisMap[[int]$chassis.ChassisTypes[0]] } else { "Unknown" }
 
@@ -27,7 +29,7 @@ $systemType = if ($chassis.ChassisTypes[0]) { $chassisMap[[int]$chassis.ChassisT
 $ips = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" }).IPAddress -join ", "
 $macs = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" }).MacAddress -join ", "
 
-# --- CHECK PENDING REBOOT (Comprehensive) ---
+# --- CHECK PENDING REBOOT ---
 $isRebootPending = $false
 $regPaths = @(
     "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
@@ -35,7 +37,6 @@ $regPaths = @(
     "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\PendingFileRenameOperations"
 )
 foreach ($path in $regPaths) { if (Test-Path $path) { $isRebootPending = $true } }
-
 $activeName = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName").ComputerName
 $pendingName = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName").ComputerName
 if ($activeName -ne $pendingName) { $isRebootPending = $true }
@@ -48,18 +49,12 @@ if ($isRebootPending) { $alerts += "Reboot Required" }
 if ($percentFree -lt 13) { $alerts += "Low Disk: $percentFree%" }
 $workStatus = if ($alerts.Count -gt 0) { "Active (" + ($alerts -join ", ") + ")" } else { "Active" }
 
-# --- GET INSTALLED SOFTWARE (Registry) ---
-$paths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
-$swRaw = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null }
-$swList = $swRaw | Select-Object @{n='name';e={$_.DisplayName}}, @{n='version';e={$_.DisplayVersion}}, @{n='vendor';e={$_.Publisher}}, @{n='installDate';e={$_.InstallDate}}
-
 # --- GET REMOTE ACCESS IDs ---
 $anydeskId = "N/A"
 $anydeskConf = "C:\ProgramData\AnyDesk\system.conf"
 if (Test-Path $anydeskConf) {
     $anydeskId = (Select-String -Path $anydeskConf -Pattern "ad.anynet.id" | ForEach-Object { $_.Line.Split('=')[1].Trim() })
 }
-
 $teamviewerId = "N/A"
 $tvPath64 = "HKLM:\SOFTWARE\TeamViewer"
 $tvPath32 = "HKLM:\SOFTWARE\WOW6432Node\TeamViewer"
@@ -69,99 +64,89 @@ if (Test-Path $tvPath64) {
     try { $teamviewerId = (Get-ItemProperty -Path $tvPath32 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
 }
 
-# --- HASH CHECK (Sync Optimization) ---
+# --- GET INSTALLED SOFTWARE ---
+$paths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
+$swRaw = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null }
+$swList = $swRaw | Select-Object @{n='name';e={$_.DisplayName}}, @{n='version';e={$_.DisplayVersion}}, @{n='vendor';e={$_.Publisher}}, @{n='installDate';e={$_.InstallDate}}
+
+# Hash sync check
 $currentHash = ($swList | ConvertTo-Json | Out-String).GetHashCode().ToString()
 $oldHash = if (Test-Path $hashFile) { Get-Content $hashFile } else { "" }
-$sendSoftware = $false
-if ($currentHash -ne $oldHash) {
-    $sendSoftware = $true
-    Set-Content -Path $hashFile -Value $currentHash
-}
+$sendSoftware = if ($currentHash -ne $oldHash) { $true } else { $false }
+if ($sendSoftware) { Set-Content -Path $hashFile -Value $currentHash }
 
 # --- PREPARE PAYLOAD ---
 $payload = @{
-    path                  = "record-activity"
-    name                  = $hostname
-    status                = $workStatus
-    operating_system_name = $os.Caption
-    processor_type        = $proc.Name.Trim()
-    number_of_processors  = $cs.NumberOfProcessors
-    memory_total_size     = "$([math]::Round($memSum, 2)) GB"
-    memory_slot_count     = $memArray.MemoryDevices
-    manufacturer          = $cs.Manufacturer
-    model                 = $cs.Model
-    serial_number         = $bios.SerialNumber
-    uuid                  = $csp.UUID
-    bios_version          = $bios.SMBIOSBIOSVersion
-    bios_date             = $bios.ReleaseDate.ToString("yyyy-MM-dd")
-    type                  = $systemType
-    ip_addresses          = $ips
-    mac_addresses         = $macs
-    last_user             = $cs.UserName
-    anydesk_id            = $anydeskId
-    teamviewer_id         = $teamviewerId
+    path = "record-activity"; name = $hostname; status = $workStatus; operating_system_name = $os.Caption
+    processor_type = $proc.Name.Trim(); number_of_processors = $cs.NumberOfProcessors; memory_total_size = "$([math]::Round($memSum, 2)) GB"
+    memory_slot_count = $memArray.MemoryDevices; manufacturer = $cs.Manufacturer; model = $cs.Model
+    serial_number = $bios.SerialNumber; uuid = $csp.UUID; bios_version = $bios.SMBIOSBIOSVersion
+    bios_date = $bios.ReleaseDate.ToString("yyyy-MM-dd"); type = $systemType; ip_addresses = $ips
+    mac_addresses = $macs; last_user = $cs.UserName; anydesk_id = $anydeskId; teamviewer_id = $teamviewerId
 }
-
 if ($sendSoftware) { $payload.softwareList = $swList }
 
-# --- SEND HEARTBEAT (Dual-Sync) ---
-Write-Host "--- DTSL Device Heartbeat (Dual-Sync) ---" -ForegroundColor Cyan
+# --- SYNC (Dual-Sync) ---
 $pendingCommand = $null
-
-# 1. Sinkronisasi ke Gateway Lokal (LAN)
+# 1. Local Gateway
 try {
-    Write-Host "Sync ke Gateway Lokal ($localGatewayUrl)..." -ForegroundColor Gray
-    $localResponse = Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5
-    if ($localResponse.success) {
-        Write-Host "   -> Sukses Sinkron Lokal." -ForegroundColor Green
-        if ($localResponse.pendingCommand) { $pendingCommand = $localResponse.pendingCommand }
-    }
-} catch {
-    Write-Host "   -> Gagal Sinkron Lokal: $($_.Exception.Message)" -ForegroundColor Yellow
-}
+    $resLocal = Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5
+    if ($resLocal.success -and $resLocal.pendingCommand) { $pendingCommand = $resLocal.pendingCommand }
+} catch { Write-Host "Local Gateway Offline." -ForegroundColor Yellow }
 
-# 2. Sinkronisasi ke Google Sheets (Internet)
+# 2. Google Sheets
 try {
-    Write-Host "Sync ke Google Sheets (GAS)..." -ForegroundColor Gray
-    # Gunakan UseBasicParsing jika di PowerShell versi lama untuk GAS
-    $gasResponse = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
-    if ($gasResponse.success) {
-        Write-Host "   -> Sukses Sinkron Google Sheets." -ForegroundColor Green
-        if ($gasResponse.pendingCommand) { $pendingCommand = $gasResponse.pendingCommand }
-    }
-} catch {
-    Write-Host "   -> Gagal Sinkron Google Sheets: $($_.Exception.Message)" -ForegroundColor Red
-}
+    $resGas = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
+    if ($resGas.success -and $resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
+} catch { Write-Host "Google Sheets Offline." -ForegroundColor Red }
 
 # --- HANDLE PENDING COMMANDS ---
 if ($pendingCommand) {
-    $cmd = $pendingCommand.ToString()
-    Write-Host "Menerima perintah: $cmd" -ForegroundColor Yellow
-    
-    if ($cmd -match "reset-anydesk:(.*)") {
-        $newPass = $matches[1]
-        $adExe = if (Test-Path "C:\Program Files (x86)\AnyDesk\AnyDesk.exe") { "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" } else { "C:\Program Files\AnyDesk\AnyDesk.exe" }
-        if (Test-Path $adExe) {
-            Write-Host "Mereset password AnyDesk via CMD pipe..." -ForegroundColor Gray
-            cmd /c "echo $newPass | `"$adExe`" --set-password"
+    $cmd = $pendingCommand.ToString(); $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Write-Host "Menerima Perintah: $cmd" -ForegroundColor Yellow
+    try {
+        if ($cmd -match "create-user:(.*):(.*)") {
+            $rawName = $matches[1]; $rawPass = $matches[2]; $cleanName = ($rawName -replace '[^a-zA-Z0-9]', '')
+            if ($cleanName.Length -gt 20) { $cleanName = $cleanName.Substring(0, 20) }
+            if ($cleanName -and !(Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue)) {
+                if ($rawPass -eq "none" -or $rawPass -eq "" -or $rawPass -eq "null") {
+                    New-LocalUser -Name $cleanName -NoPassword -FullName $rawName -ErrorAction Stop
+                    "[$timestamp] SUCCESS: User $cleanName created with BLANK password." | Out-File -FilePath $logPath -Append
+                } else {
+                    $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
+                    New-LocalUser -Name $cleanName -Password $secPass -FullName $rawName -ErrorAction Stop
+                    "[$timestamp] SUCCESS: User $cleanName created with password." | Out-File -FilePath $logPath -Append
+                }
+                Add-LocalGroupMember -Group "Administrators" -Member $cleanName -ErrorAction Stop
+            }
         }
-    }
-    elseif ($cmd -eq "winrm-enable") {
-        Write-Host "Mengaktifkan WinRM..." -ForegroundColor Gray
-        Enable-PSRemoting -Force
-    }
-    elseif ($cmd -match "create-user:(.*):(.*)") {
-        $rawName = $matches[1]
-        $rawPass = $matches[2]
-        $cleanName = ($rawName -replace '[^a-zA-Z0-9]', '')
-        if ($cleanName.Length -gt 20) { $cleanName = $cleanName.Substring(0, 20) }
-        
-        if ($cleanName -and !(Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue)) {
-            Write-Host "Membuat user baru: $cleanName..." -ForegroundColor Cyan
-            $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
-            New-LocalUser -Name $cleanName -Password $secPass -FullName $rawName -Description "DTSL Auto-Provisioned"
-            Add-LocalGroupMember -Group "Administrators" -Member $cleanName
-            Write-Host "User $cleanName berhasil dibuat & diset sebagai Admin." -ForegroundColor Green
+        elseif ($cmd -match "reset-password:(.*):(.*)") {
+            $targetUser = $matches[1]; $newPass = $matches[2]
+            if (Get-LocalUser -Name $targetUser -ErrorAction SilentlyContinue) {
+                if ($newPass -eq "none" -or $newPass -eq "" -or $newPass -eq "null") {
+                    Set-LocalUser -Name $targetUser -Password $null -ErrorAction Stop
+                    "[$timestamp] SUCCESS: Password for $targetUser reset to BLANK." | Out-File -FilePath $logPath -Append
+                } else {
+                    $secPass = ConvertTo-SecureString $newPass -AsPlainText -Force
+                    Set-LocalUser -Name $targetUser -Password $secPass -ErrorAction Stop
+                    "[$timestamp] SUCCESS: Password for $targetUser reset." | Out-File -FilePath $logPath -Append
+                }
+            }
         }
+        elseif ($cmd -match "reset-anydesk:(.*)") {
+            $newPass = $matches[1]
+            $adExe = if (Test-Path "C:\Program Files (x86)\AnyDesk\AnyDesk.exe") { "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" } else { "C:\Program Files\AnyDesk\AnyDesk.exe" }
+            if (Test-Path $adExe) {
+                cmd /c "echo $newPass | `"$adExe`" --set-password"
+                "[$timestamp] SUCCESS: AnyDesk password reset initiated." | Out-File -FilePath $logPath -Append
+            }
+        }
+        elseif ($cmd -eq "winrm-enable") {
+            Enable-PSRemoting -Force -ErrorAction Stop
+            "[$timestamp] SUCCESS: WinRM enabled." | Out-File -FilePath $logPath -Append
+        }
+    } catch {
+        "[$timestamp] ERROR on command '$cmd': $($_.Exception.Message)" | Out-File -FilePath $logPath -Append
     }
 }
+Write-Host "Sync Complete." -ForegroundColor Green
