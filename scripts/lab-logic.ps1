@@ -1,10 +1,11 @@
 # ======================================================================
-# SCRIPT: lab-logic.ps1 (Update 2026-03-22)
-# FUNGSI: Mengirimkan heartbeat dan spesifikasi hardware ke GAS API
+# SCRIPT: lab-logic.ps1 (Update 2026-03-24 - Dual Sync Edition)
+# FUNGSI: Mengirimkan heartbeat ke Gateway Lokal (LAN) & GAS API (Cloud)
 # ======================================================================
 
 # --- CONFIGURATION ---
 $gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec" 
+$localGatewayUrl = "http://10.47.106.9:5000/inventory" # IP Gateway Lokal di Lab
 $hostname = $env:COMPUTERNAME
 $hashFile = "C:\Users\Public\Documents\DTSL\dtsl_sw_hash.txt"
 
@@ -28,7 +29,6 @@ $macs = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" }).MacAddress -join 
 
 # --- CHECK PENDING REBOOT (Comprehensive) ---
 $isRebootPending = $false
-# 1. Common Registry Checks
 $regPaths = @(
     "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
     "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending",
@@ -36,7 +36,6 @@ $regPaths = @(
 )
 foreach ($path in $regPaths) { if (Test-Path $path) { $isRebootPending = $true } }
 
-# 2. Rename Check (Current vs Pending Name)
 $activeName = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName").ComputerName
 $pendingName = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName").ComputerName
 if ($activeName -ne $pendingName) { $isRebootPending = $true }
@@ -105,50 +104,64 @@ $payload = @{
 
 if ($sendSoftware) { $payload.softwareList = $swList }
 
-# --- SEND HEARTBEAT ---
+# --- SEND HEARTBEAT (Dual-Sync) ---
+Write-Host "--- DTSL Device Heartbeat (Dual-Sync) ---" -ForegroundColor Cyan
+$pendingCommand = $null
+
+# 1. Sinkronisasi ke Gateway Lokal (LAN)
 try {
-    Write-Host "Mengirim data inventory untuk $hostname..." -ForegroundColor Cyan
-    $response = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json) -ContentType "application/json"
-    if ($response.success) {
-        Write-Host "Berhasil di-update ke Spreadsheet Inventory!" -ForegroundColor Green
-        
-        # --- HANDLE PENDING COMMANDS ---
-        if ($response.pendingCommand) {
-            $cmd = $response.pendingCommand.ToString()
-            Write-Host "Menerima perintah: $cmd" -ForegroundColor Yellow
-            
-            if ($cmd -match "reset-anydesk:(.*)") {
-                $newPass = $matches[1]
-                $adExe = if (Test-Path "C:\Program Files (x86)\AnyDesk\AnyDesk.exe") { "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" } else { "C:\Program Files\AnyDesk\AnyDesk.exe" }
-                if (Test-Path $adExe) {
-                    Write-Host "Mereset password AnyDesk via CMD pipe..." -ForegroundColor Gray
-                    cmd /c "echo $newPass | `"$adExe`" --set-password"
-                }
-            }
-            elseif ($cmd -eq "winrm-enable") {
-                Write-Host "Mengaktifkan WinRM..." -ForegroundColor Gray
-                Enable-PSRemoting -Force
-            }
-            elseif ($cmd -match "create-user:(.*):(.*)") {
-                $rawName = $matches[1]
-                $rawPass = $matches[2]
-                
-                # Sanitasi Nama (Maks 20 char, Alfanumerik saja)
-                $cleanName = ($rawName -replace '[^a-zA-Z0-9]', '')
-                if ($cleanName.Length -gt 20) { $cleanName = $cleanName.Substring(0, 20) }
-                
-                if ($cleanName -and !(Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue)) {
-                    Write-Host "Membuat user baru: $cleanName..." -ForegroundColor Cyan
-                    $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
-                    New-LocalUser -Name $cleanName -Password $secPass -FullName $rawName -Description "DTSL Auto-Provisioned"
-                    Add-LocalGroupMember -Group "Administrators" -Member $cleanName
-                    Write-Host "User $cleanName berhasil dibuat & diset sebagai Admin." -ForegroundColor Green
-                }
-            }
-        }
-    } else {
-        Write-Host "Gagal: $($response.message)" -ForegroundColor Red
+    Write-Host "Sync ke Gateway Lokal ($localGatewayUrl)..." -ForegroundColor Gray
+    $localResponse = Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5
+    if ($localResponse.success) {
+        Write-Host "   -> Sukses Sinkron Lokal." -ForegroundColor Green
+        if ($localResponse.pendingCommand) { $pendingCommand = $localResponse.pendingCommand }
     }
 } catch {
-    Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "   -> Gagal Sinkron Lokal: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
+# 2. Sinkronisasi ke Google Sheets (Internet)
+try {
+    Write-Host "Sync ke Google Sheets (GAS)..." -ForegroundColor Gray
+    # Gunakan UseBasicParsing jika di PowerShell versi lama untuk GAS
+    $gasResponse = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
+    if ($gasResponse.success) {
+        Write-Host "   -> Sukses Sinkron Google Sheets." -ForegroundColor Green
+        if ($gasResponse.pendingCommand) { $pendingCommand = $gasResponse.pendingCommand }
+    }
+} catch {
+    Write-Host "   -> Gagal Sinkron Google Sheets: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# --- HANDLE PENDING COMMANDS ---
+if ($pendingCommand) {
+    $cmd = $pendingCommand.ToString()
+    Write-Host "Menerima perintah: $cmd" -ForegroundColor Yellow
+    
+    if ($cmd -match "reset-anydesk:(.*)") {
+        $newPass = $matches[1]
+        $adExe = if (Test-Path "C:\Program Files (x86)\AnyDesk\AnyDesk.exe") { "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" } else { "C:\Program Files\AnyDesk\AnyDesk.exe" }
+        if (Test-Path $adExe) {
+            Write-Host "Mereset password AnyDesk via CMD pipe..." -ForegroundColor Gray
+            cmd /c "echo $newPass | `"$adExe`" --set-password"
+        }
+    }
+    elseif ($cmd -eq "winrm-enable") {
+        Write-Host "Mengaktifkan WinRM..." -ForegroundColor Gray
+        Enable-PSRemoting -Force
+    }
+    elseif ($cmd -match "create-user:(.*):(.*)") {
+        $rawName = $matches[1]
+        $rawPass = $matches[2]
+        $cleanName = ($rawName -replace '[^a-zA-Z0-9]', '')
+        if ($cleanName.Length -gt 20) { $cleanName = $cleanName.Substring(0, 20) }
+        
+        if ($cleanName -and !(Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue)) {
+            Write-Host "Membuat user baru: $cleanName..." -ForegroundColor Cyan
+            $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
+            New-LocalUser -Name $cleanName -Password $secPass -FullName $rawName -Description "DTSL Auto-Provisioned"
+            Add-LocalGroupMember -Group "Administrators" -Member $cleanName
+            Write-Host "User $cleanName berhasil dibuat & diset sebagai Admin." -ForegroundColor Green
+        }
+    }
 }
