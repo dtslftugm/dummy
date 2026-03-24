@@ -54,6 +54,22 @@ $paths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:
 $swRaw = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null }
 $swList = $swRaw | Select-Object @{n='name';e={$_.DisplayName}}, @{n='version';e={$_.DisplayVersion}}, @{n='vendor';e={$_.Publisher}}, @{n='installDate';e={$_.InstallDate}}
 
+# --- GET REMOTE ACCESS IDs ---
+$anydeskId = "N/A"
+$anydeskConf = "C:\ProgramData\AnyDesk\system.conf"
+if (Test-Path $anydeskConf) {
+    $anydeskId = (Select-String -Path $anydeskConf -Pattern "ad.anynet.id" | ForEach-Object { $_.Line.Split('=')[1].Trim() })
+}
+
+$teamviewerId = "N/A"
+$tvPath64 = "HKLM:\SOFTWARE\TeamViewer"
+$tvPath32 = "HKLM:\SOFTWARE\WOW6432Node\TeamViewer"
+if (Test-Path $tvPath64) {
+    try { $teamviewerId = (Get-ItemProperty -Path $tvPath64 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
+} elseif (Test-Path $tvPath32) {
+    try { $teamviewerId = (Get-ItemProperty -Path $tvPath32 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
+}
+
 # --- HASH CHECK (Sync Optimization) ---
 $currentHash = ($swList | ConvertTo-Json | Out-String).GetHashCode().ToString()
 $oldHash = if (Test-Path $hashFile) { Get-Content $hashFile } else { "" }
@@ -83,6 +99,8 @@ $payload = @{
     ip_addresses          = $ips
     mac_addresses         = $macs
     last_user             = $cs.UserName
+    anydesk_id            = $anydeskId
+    teamviewer_id         = $teamviewerId
 }
 
 if ($sendSoftware) { $payload.softwareList = $swList }
@@ -93,6 +111,41 @@ try {
     $response = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json) -ContentType "application/json"
     if ($response.success) {
         Write-Host "Berhasil di-update ke Spreadsheet Inventory!" -ForegroundColor Green
+        
+        # --- HANDLE PENDING COMMANDS ---
+        if ($response.pendingCommand) {
+            $cmd = $response.pendingCommand.ToString()
+            Write-Host "Menerima perintah: $cmd" -ForegroundColor Yellow
+            
+            if ($cmd -match "reset-anydesk:(.*)") {
+                $newPass = $matches[1]
+                $adExe = if (Test-Path "C:\Program Files (x86)\AnyDesk\AnyDesk.exe") { "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" } else { "C:\Program Files\AnyDesk\AnyDesk.exe" }
+                if (Test-Path $adExe) {
+                    Write-Host "Mereset password AnyDesk via CMD pipe..." -ForegroundColor Gray
+                    cmd /c "echo $newPass | `"$adExe`" --set-password"
+                }
+            }
+            elseif ($cmd -eq "winrm-enable") {
+                Write-Host "Mengaktifkan WinRM..." -ForegroundColor Gray
+                Enable-PSRemoting -Force
+            }
+            elseif ($cmd -match "create-user:(.*):(.*)") {
+                $rawName = $matches[1]
+                $rawPass = $matches[2]
+                
+                # Sanitasi Nama (Maks 20 char, Alfanumerik saja)
+                $cleanName = ($rawName -replace '[^a-zA-Z0-9]', '')
+                if ($cleanName.Length -gt 20) { $cleanName = $cleanName.Substring(0, 20) }
+                
+                if ($cleanName -and !(Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue)) {
+                    Write-Host "Membuat user baru: $cleanName..." -ForegroundColor Cyan
+                    $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
+                    New-LocalUser -Name $cleanName -Password $secPass -FullName $rawName -Description "DTSL Auto-Provisioned"
+                    Add-LocalGroupMember -Group "Administrators" -Member $cleanName
+                    Write-Host "User $cleanName berhasil dibuat & diset sebagai Admin." -ForegroundColor Green
+                }
+            }
+        }
     } else {
         Write-Host "Gagal: $($response.message)" -ForegroundColor Red
     }
