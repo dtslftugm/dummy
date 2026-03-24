@@ -6,7 +6,7 @@
 # --- CONFIGURATION ---
 $gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec" 
 $hostname = $env:COMPUTERNAME
-$hashFile = "$env:TEMP\dtsl_sw_hash.txt"
+$hashFile = "C:\Users\Public\Documents\DTSL\dtsl_sw_hash.txt"
 
 # --- GET HARDWARE INFO (CIM Mode - Faster) ---
 $cs = Get-CimInstance Win32_ComputerSystem
