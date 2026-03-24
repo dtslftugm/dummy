@@ -4,7 +4,7 @@
 # ======================================================================
 
 # --- CONFIGURATION ---
-$gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec" # GANTI DENGAN URL WEB APP INVENTORY ANDA
+$gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec" 
 $hostname = $env:COMPUTERNAME
 $hashFile = "$env:TEMP\dtsl_sw_hash.txt"
 
@@ -26,10 +26,20 @@ $systemType = if ($chassis.ChassisTypes[0]) { $chassisMap[[int]$chassis.ChassisT
 $ips = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" }).IPAddress -join ", "
 $macs = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" }).MacAddress -join ", "
 
-# --- CHECK PENDING REBOOT ---
+# --- CHECK PENDING REBOOT (Comprehensive) ---
 $isRebootPending = $false
-$regPaths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired", "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")
+# 1. Common Registry Checks
+$regPaths = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending",
+    "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\PendingFileRenameOperations"
+)
 foreach ($path in $regPaths) { if (Test-Path $path) { $isRebootPending = $true } }
+
+# 2. Rename Check (Current vs Pending Name)
+$activeName = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName").ComputerName
+$pendingName = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName").ComputerName
+if ($activeName -ne $pendingName) { $isRebootPending = $true }
 
 # Disk Check
 $cDrive = Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DeviceID -eq "C:" }
