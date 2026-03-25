@@ -22,7 +22,7 @@ $memArray = Get-CimInstance Win32_PhysicalMemoryArray
 $memSum = (Get-CimInstance Win32_PhysicalMemory | Measure-Object Capacity -Sum).Sum / 1GB
 $csp = Get-CimInstance Win32_ComputerSystemProduct
 $chassis = Get-CimInstance Win32_SystemEnclosure
-$chassisMap = @{ 3="Desktop"; 4="Low Profile Desktop"; 8="Portable"; 9="Laptop"; 10="Notebook"; 13="All in One" }
+$chassisMap = @{ 3 = "Desktop"; 4 = "Low Profile Desktop"; 8 = "Portable"; 9 = "Laptop"; 10 = "Notebook"; 13 = "All in One" }
 $systemType = if ($chassis.ChassisTypes[0]) { $chassisMap[[int]$chassis.ChassisTypes[0]] } else { "Unknown" }
 
 # --- GET NETWORK INFO ---
@@ -60,14 +60,15 @@ $tvPath64 = "HKLM:\SOFTWARE\TeamViewer"
 $tvPath32 = "HKLM:\SOFTWARE\WOW6432Node\TeamViewer"
 if (Test-Path $tvPath64) {
     try { $teamviewerId = (Get-ItemProperty -Path $tvPath64 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
-} elseif (Test-Path $tvPath32) {
+}
+elseif (Test-Path $tvPath32) {
     try { $teamviewerId = (Get-ItemProperty -Path $tvPath32 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
 }
 
 # --- GET INSTALLED SOFTWARE ---
 $paths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
 $swRaw = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null }
-$swList = $swRaw | Select-Object @{n='name';e={$_.DisplayName}}, @{n='version';e={$_.DisplayVersion}}, @{n='vendor';e={$_.Publisher}}, @{n='installDate';e={$_.InstallDate}}
+$swList = $swRaw | Select-Object @{n = 'name'; e = { $_.DisplayName } }, @{n = 'version'; e = { $_.DisplayVersion } }, @{n = 'vendor'; e = { $_.Publisher } }, @{n = 'installDate'; e = { $_.InstallDate } }
 
 # Hash sync check
 $currentHash = ($swList | ConvertTo-Json | Out-String).GetHashCode().ToString()
@@ -92,65 +93,114 @@ $pendingCommand = $null
 try {
     $resLocal = Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5
     if ($resLocal.success -and $resLocal.pendingCommand) { $pendingCommand = $resLocal.pendingCommand }
-} catch { Write-Host "Local Gateway Offline." -ForegroundColor Yellow }
+}
+catch { Write-Host "Local Gateway Offline." -ForegroundColor Yellow }
 
 # 2. Google Sheets
 try {
     $resGas = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
     if ($resGas.success -and $resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
-} catch { Write-Host "Google Sheets Offline." -ForegroundColor Red }
+}
+catch { Write-Host "Google Sheets Offline." -ForegroundColor Red }
 
 # --- HANDLE PENDING COMMANDS ---
 if ($pendingCommand) {
     $cmd = $pendingCommand.ToString(); $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     Write-Host "Menerima Perintah: $cmd" -ForegroundColor Yellow
-    
-    # Log receipt immediately for debugging
     "[$timestamp] RECEIVED: $cmd" | Out-File -FilePath $logPath -Append
 
+    $result = "" 
     try {
         if ($cmd -match "create-user:([^:]*):(.*)") {
             $rawName = $matches[1]; $rawPass = $matches[2]; $cleanName = ($rawName -replace '[^a-zA-Z0-9]', '')
             if ($cleanName.Length -gt 20) { $cleanName = $cleanName.Substring(0, 20) }
+            
             if ($cleanName -and !(Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue)) {
                 if ($rawPass -eq "none" -or $rawPass -eq "" -or $rawPass -eq "null") {
                     New-LocalUser -Name $cleanName -NoPassword -FullName $rawName -ErrorAction Stop
-                    "[$timestamp] SUCCESS: User $cleanName created with BLANK password." | Out-File -FilePath $logPath -Append
-                } else {
+                }
+                else {
                     $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
                     New-LocalUser -Name $cleanName -Password $secPass -FullName $rawName -ErrorAction Stop
-                    "[$timestamp] SUCCESS: User $cleanName created with password." | Out-File -FilePath $logPath -Append
                 }
                 Add-LocalGroupMember -Group "Administrators" -Member $cleanName -ErrorAction Stop
+                
+                # --- STRICT VERIFICATION WITH RETRY (max 90s, check every 30s) ---
+                $verified = $false
+                for ($i = 0; $i -lt 3; $i++) {
+                    if (Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue) { $verified = $true; break }
+                    Start-Sleep -Seconds 30
+                }
+                if ($verified) {
+                    $result = "VERIFIED SUCCESS: User $cleanName created & exists."
+                } else {
+                    $result = "FAILED VERIFICATION: User $cleanName command ran but not found after 90 seconds."
+                }
+            }
+            else {
+                $result = "SKIP: User $cleanName already exists or invalid name."
             }
         }
         elseif ($cmd -match "reset-password:([^:]*):(.*)") {
             $targetUser = $matches[1]; $newPass = $matches[2]
-            if (Get-LocalUser -Name $targetUser -ErrorAction SilentlyContinue) {
+            $u = Get-LocalUser -Name $targetUser -ErrorAction SilentlyContinue
+            if ($u) {
+                $preDate = $u.PasswordLastSet
                 if ($newPass -eq "none" -or $newPass -eq "" -or $newPass -eq "null") {
                     Set-LocalUser -Name $targetUser -Password $null -ErrorAction Stop
-                    "[$timestamp] SUCCESS: Password for $targetUser reset to BLANK." | Out-File -FilePath $logPath -Append
-                } else {
+                }
+                else {
                     $secPass = ConvertTo-SecureString $newPass -AsPlainText -Force
                     Set-LocalUser -Name $targetUser -Password $secPass -ErrorAction Stop
-                    "[$timestamp] SUCCESS: Password for $targetUser reset." | Out-File -FilePath $logPath -Append
+                }
+                # --- STRICT VERIFICATION WITH RETRY (max 30s, check every 10s) ---
+                $verified = $false
+                for ($i = 0; $i -lt 3; $i++) {
+                    $postDate = (Get-LocalUser -Name $targetUser -ErrorAction SilentlyContinue).PasswordLastSet
+                    if ($postDate -ne $preDate) { $verified = $true; break }
+                    Start-Sleep -Seconds 10
+                }
+                if ($verified) {
+                    $result = "VERIFIED SUCCESS: Password for $targetUser updated."
+                } else {
+                    $result = "FAILED VERIFICATION: Password for $targetUser command ran but timestamp unchanged after 30 seconds."
                 }
             }
+            else { $result = "ERROR: User $targetUser not found." }
         }
         elseif ($cmd -match "reset-anydesk:(.*)") {
             $newPass = $matches[1]
             $adExe = if (Test-Path "C:\Program Files (x86)\AnyDesk\AnyDesk.exe") { "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" } else { "C:\Program Files\AnyDesk\AnyDesk.exe" }
             if (Test-Path $adExe) {
                 cmd /c "echo $newPass | `"$adExe`" --set-password"
-                "[$timestamp] SUCCESS: AnyDesk password reset initiated." | Out-File -FilePath $logPath -Append
+                $result = "VERIFIED SUCCESS: AnyDesk password set command sent."
             }
+            else { $result = "ERROR: AnyDesk not installed." }
         }
         elseif ($cmd -eq "winrm-enable") {
             Enable-PSRemoting -Force -ErrorAction Stop
-            "[$timestamp] SUCCESS: WinRM enabled." | Out-File -FilePath $logPath -Append
+            if ((Get-Service WinRM).Status -eq "Running") {
+                $result = "VERIFIED SUCCESS: WinRM enabled and Running."
+            }
+            else {
+                $result = "FAILED VERIFICATION: WinRM command ran but service not Running."
+            }
         }
-    } catch {
-        "[$timestamp] ERROR on command '$cmd': $($_.Exception.Message)" | Out-File -FilePath $logPath -Append
+
+        # Send Feedback to GAS/Gateway
+        if ($result) {
+            $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            "[$timestamp] $result" | Out-File -FilePath $logPath -Append
+            $feedback = @{ path = "command-feedback"; uuid = $csp.UUID; result = $result }
+            Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($feedback | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
+        }
+    }
+    catch {
+        $err = "ERROR on command '$cmd': $($_.Exception.Message)"
+        "[$timestamp] $err" | Out-File -FilePath $logPath -Append
+        $feedback = @{ path = "command-feedback"; uuid = $csp.UUID; result = $err }
+        Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($feedback | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
     }
 }
 Write-Host "Sync Complete." -ForegroundColor Green
+
