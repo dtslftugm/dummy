@@ -6,7 +6,7 @@
 # --- CONFIGURATION ---
 $gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec" 
 $localGatewayUrl = "http://10.47.106.9:5000/inventory"
-$hostname = $env:COMPUTERNAME
+$hostname = [System.Net.Dns]::GetHostName()
 $hashFile = "C:\Users\Public\Documents\DTSL\dtsl_sw_hash.txt"
 $logPath = "C:\Users\Public\Documents\DTSL\command_log.txt"
 
