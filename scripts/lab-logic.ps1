@@ -99,9 +99,11 @@ catch { Write-Host "Local Gateway Offline." -ForegroundColor Yellow }
 # 2. Google Sheets
 try {
     $resGas = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
+    # DEBUG: Log raw GAS response
+    $dbgTs = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "[$dbgTs] DEBUG GAS response: success=$($resGas.success) | pendingCommand=$($resGas.pendingCommand)" | Out-File -FilePath $logPath -Append
     if ($resGas.success -and $resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
-}
-catch { Write-Host "Google Sheets Offline." -ForegroundColor Red }
+} catch { Write-Host "Google Sheets Offline." -ForegroundColor Red }
 
 # --- HANDLE PENDING COMMANDS ---
 if ($pendingCommand) {
