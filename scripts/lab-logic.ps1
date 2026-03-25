@@ -104,8 +104,12 @@ try {
 if ($pendingCommand) {
     $cmd = $pendingCommand.ToString(); $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     Write-Host "Menerima Perintah: $cmd" -ForegroundColor Yellow
+    
+    # Log receipt immediately for debugging
+    "[$timestamp] RECEIVED: $cmd" | Out-File -FilePath $logPath -Append
+
     try {
-        if ($cmd -match "create-user:(.*):(.*)") {
+        if ($cmd -match "create-user:([^:]*):(.*)") {
             $rawName = $matches[1]; $rawPass = $matches[2]; $cleanName = ($rawName -replace '[^a-zA-Z0-9]', '')
             if ($cleanName.Length -gt 20) { $cleanName = $cleanName.Substring(0, 20) }
             if ($cleanName -and !(Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue)) {
@@ -120,7 +124,7 @@ if ($pendingCommand) {
                 Add-LocalGroupMember -Group "Administrators" -Member $cleanName -ErrorAction Stop
             }
         }
-        elseif ($cmd -match "reset-password:(.*):(.*)") {
+        elseif ($cmd -match "reset-password:([^:]*):(.*)") {
             $targetUser = $matches[1]; $newPass = $matches[2]
             if (Get-LocalUser -Name $targetUser -ErrorAction SilentlyContinue) {
                 if ($newPass -eq "none" -or $newPass -eq "" -or $newPass -eq "null") {
