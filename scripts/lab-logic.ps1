@@ -1,5 +1,5 @@
 # ======================================================================
-# SCRIPT: lab-logic.ps1 (Update 2026-03-24 - Final Robust Edition)
+# SCRIPT: lab-logic.ps1 (Update 2026-03-26 - Final Robust Edition)
 # FUNGSI: Heartbeat, Inventory, & Command Execution via Local Gateway/Cloud
 # ======================================================================
 # =============================================================================
@@ -25,17 +25,24 @@
 #       Mengaktifkan Windows Remote Management (PSRemoting).
 #       Contoh: winrm-enable
 #
-# SYNTAX MULTI-PERINTAH (dipisah oleh "|"):
-#   Tempatkan perintah yang memerlukan restart di bagian AKHIR.
-#   Contoh: create-user:LABKOMP:Tsipil#1!|winrm-enable|reset-anydesk:AnyPass
+#   rename-computer:<nama_baru>
+#       Mengganti hostname unit komputer. Membutuhkan restart.
+#       Tempatkan di akhir antrian perintah.
+#       Contoh: rename-computer:FT-DTSL-PC-01
+#
+#   restart
+#       Merestart komputer secara remote (delay 15 detik).
+#       Hanya dieksekusi bila komputer IDLE (tidak ada user login aktif
+#       dan tidak ada aplikasi office/editor yang berjalan).
+#       SELALU tempatkan di posisi PALING AKHIR dalam antrian.
+#       Contoh: rename-computer:FT-DTSL-PC-01|restart
 #
 # FEEDBACK: Setiap perintah menghasilkan status bernomor [N/M] di kolom
 #   last_command_result pada sheet Devices.
 # =============================================================================
 
-
 # --- CONFIGURATION ---
-$gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec" 
+$gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec"
 $localGatewayUrl = "http://10.47.106.9:5000/inventory"
 $hostname = [System.Net.Dns]::GetHostName()
 $hashFile = "C:\Users\Public\Documents\DTSL\dtsl_sw_hash.txt"
@@ -120,6 +127,7 @@ if ($sendSoftware) { $payload.softwareList = $swList }
 
 # --- SYNC (Dual-Sync) ---
 $pendingCommand = $null
+
 # 1. Local Gateway (primary — forwards heartbeat to GAS and relays pendingCommand)
 try {
     $resLocal = Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5
@@ -219,6 +227,42 @@ if ($pendingCommand) {
             elseif ($cmd -eq "winrm-enable") {
                 Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction Stop
                 $result = if ((Get-Service WinRM).Status -eq "Running") { "VERIFIED SUCCESS: WinRM enabled and Running." } else { "FAILED VERIFICATION: WinRM service not Running." }
+            }
+            elseif ($cmd -match "rename-computer:(.*)") {
+                $newName = $matches[1].Trim() -replace '[^a-zA-Z0-9\-]', ''
+                if ($newName.Length -gt 0 -and $newName.Length -le 15) {
+                    Rename-Computer -NewName $newName -Force -ErrorAction Stop
+                    $result = "VERIFIED SUCCESS: Hostname akan menjadi '$newName' setelah restart."
+                }
+                else {
+                    $result = "ERROR: Nama komputer '$newName' tidak valid (maks 15 karakter, alfanumerik dan tanda hubung)."
+                }
+            }
+            elseif ($cmd -eq "restart") {
+                # Cek apakah ada user yang aktif login
+                $activeUser = (Get-CimInstance Win32_ComputerSystem).UserName
+                # Cek apakah ada aplikasi office/editor yang berjalan
+                $riskyProcs = @("WINWORD", "EXCEL", "POWERPNT", "notepad", "Code", "devenv", "OUTLOOK")
+                $openApps = Get-Process -ErrorAction SilentlyContinue | Where-Object { $riskyProcs -contains $_.ProcessName }
+
+                if ($activeUser -and $activeUser -ne "") {
+                    $result = "ABORTED: User '$activeUser' masih login aktif. Restart dibatalkan."
+                }
+                elseif ($openApps) {
+                    $appList = ($openApps.ProcessName | Sort-Object -Unique) -join ", "
+                    $result = "ABORTED: Aplikasi '$appList' masih berjalan. Restart dibatalkan."
+                }
+                else {
+                    # Kirim feedback partial ke GAS sebelum restart
+                    $partialResults = $allResults + "[$cmdIndex/$total] Restarting in 15 seconds..."
+                    $partialFb = @{ path = "command-feedback"; uuid = $csp.UUID; result = ($partialResults -join "`n") }
+                    Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($partialFb | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
+                    shutdown /r /t 15 /c "DTSL Inventory Remote Restart"
+                    $result = "Restarting in 15 seconds..."
+                    $allResults += "[$cmdIndex/$total] $result"
+                    Remove-Item -Path $queueFile -Force -ErrorAction SilentlyContinue
+                    break
+                }
             }
             else {
                 $result = "UNKNOWN COMMAND: $cmd"
