@@ -119,11 +119,11 @@ if ($sendSoftware) { $payload.softwareList = $swList }
 # --- SYNC (Dual-Sync) ---
 $pendingCommand = $null
 
-# 1. Local Gateway
+# 1. Local Gateway (sync data only, no command)
 try {
-    $resLocal = Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5
-    if ($resLocal.success -and $resLocal.pendingCommand) { $pendingCommand = $resLocal.pendingCommand }
+    Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5 -ErrorAction SilentlyContinue
 } catch { Write-Host "Local Gateway Offline." -ForegroundColor Yellow }
+
 
 # 2. Google Sheets
 try {
@@ -206,7 +206,7 @@ if ($pendingCommand) {
                 } else { $result = "ERROR: AnyDesk not installed." }
             }
             elseif ($cmd -eq "winrm-enable") {
-                Enable-PSRemoting -Force -ErrorAction Stop
+                Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction Stop
                 $result = if ((Get-Service WinRM).Status -eq "Running") { "VERIFIED SUCCESS: WinRM enabled and Running." } else { "FAILED VERIFICATION: WinRM service not Running." }
             }
             else {
@@ -224,11 +224,10 @@ if ($pendingCommand) {
         Write-Host $numbered -ForegroundColor $(if ($result -match "SUCCESS") { "Green" } elseif ($result -match "SKIP") { "Cyan" } else { "Red" })
     }
 
-    # Kirim feedback gabungan ke GAS dan Gateway
+    # Kirim feedback ke GAS
     $combinedResult = $allResults -join "`n"
     $feedback = @{ path = "command-feedback"; uuid = $csp.UUID; result = $combinedResult }
     Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($feedback | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
-    Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($feedback | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
 
     # Hapus queue file setelah selesai
     Remove-Item -Path $queueFile -Force -ErrorAction SilentlyContinue
