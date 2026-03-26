@@ -1,10 +1,40 @@
 # ======================================================================
-# SCRIPT: lab-logic.ps1 (Update 2026-03-24 - Final Robust Edition)
+# SCRIPT: lab-logic.ps1 (Update 2026-03-26)
 # FUNGSI: Heartbeat, Inventory, & Command Execution via Local Gateway/Cloud
 # ======================================================================
+# =============================================================================
+# DAFTAR PERINTAH YANG TERSEDIA (pending_command di sheet Devices)
+# Gunakan pipe "|" untuk menggabungkan beberapa perintah sekaligus.
+#
+# SYNTAX PERINTAH TUNGGAL:
+#   create-user:<nama_user>:<password>
+#       Membuat user lokal baru sebagai Administrator.
+#       Password "none" = user tanpa password.
+#       Contoh: create-user:LABKOMP:Tsipil#1!
+#
+#   reset-password:<nama_user>:<password_baru>
+#       Mengubah password user lokal yang sudah ada.
+#       Password "none" = hapus password (no password).
+#       Contoh: reset-password:LABKOMP:NewPass123
+#
+#   reset-anydesk:<password_baru>
+#       Mengatur ulang password AnyDesk pada unit ini.
+#       Contoh: reset-anydesk:AnyDeskPass!
+#
+#   winrm-enable
+#       Mengaktifkan Windows Remote Management (PSRemoting).
+#       Contoh: winrm-enable
+#
+# SYNTAX MULTI-PERINTAH (dipisah oleh "|"):
+#   Tempatkan perintah yang memerlukan restart di bagian AKHIR.
+#   Contoh: create-user:LABKOMP:Tsipil#1!|winrm-enable|reset-anydesk:AnyPass
+#
+# FEEDBACK: Setiap perintah menghasilkan status bernomor [N/M] di kolom
+#   last_command_result pada sheet Devices.
+# =============================================================================
 
 # --- CONFIGURATION ---
-$gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec" 
+$gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec"
 $localGatewayUrl = "http://10.47.106.9:5000/inventory"
 $hostname = [System.Net.Dns]::GetHostName()
 $hashFile = "C:\Users\Public\Documents\DTSL\dtsl_sw_hash.txt"
@@ -22,7 +52,7 @@ $memArray = Get-CimInstance Win32_PhysicalMemoryArray
 $memSum = (Get-CimInstance Win32_PhysicalMemory | Measure-Object Capacity -Sum).Sum / 1GB
 $csp = Get-CimInstance Win32_ComputerSystemProduct
 $chassis = Get-CimInstance Win32_SystemEnclosure
-$chassisMap = @{ 3 = "Desktop"; 4 = "Low Profile Desktop"; 8 = "Portable"; 9 = "Laptop"; 10 = "Notebook"; 13 = "All in One" }
+$chassisMap = @{ 3="Desktop"; 4="Low Profile Desktop"; 8="Portable"; 9="Laptop"; 10="Notebook"; 13="All in One" }
 $systemType = if ($chassis.ChassisTypes[0]) { $chassisMap[[int]$chassis.ChassisTypes[0]] } else { "Unknown" }
 
 # --- GET NETWORK INFO ---
@@ -60,15 +90,14 @@ $tvPath64 = "HKLM:\SOFTWARE\TeamViewer"
 $tvPath32 = "HKLM:\SOFTWARE\WOW6432Node\TeamViewer"
 if (Test-Path $tvPath64) {
     try { $teamviewerId = (Get-ItemProperty -Path $tvPath64 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
-}
-elseif (Test-Path $tvPath32) {
+} elseif (Test-Path $tvPath32) {
     try { $teamviewerId = (Get-ItemProperty -Path $tvPath32 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
 }
 
 # --- GET INSTALLED SOFTWARE ---
 $paths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
 $swRaw = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null }
-$swList = $swRaw | Select-Object @{n = 'name'; e = { $_.DisplayName } }, @{n = 'version'; e = { $_.DisplayVersion } }, @{n = 'vendor'; e = { $_.Publisher } }, @{n = 'installDate'; e = { $_.InstallDate } }
+$swList = $swRaw | Select-Object @{n='name';e={$_.DisplayName}}, @{n='version';e={$_.DisplayVersion}}, @{n='vendor';e={$_.Publisher}}, @{n='installDate';e={$_.InstallDate}}
 
 # Hash sync check
 $currentHash = ($swList | ConvertTo-Json | Out-String).GetHashCode().ToString()
@@ -89,85 +118,61 @@ if ($sendSoftware) { $payload.softwareList = $swList }
 
 # --- SYNC (Dual-Sync) ---
 $pendingCommand = $null
+
 # 1. Local Gateway
 try {
     $resLocal = Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5
     if ($resLocal.success -and $resLocal.pendingCommand) { $pendingCommand = $resLocal.pendingCommand }
-}
-catch { Write-Host "Local Gateway Offline." -ForegroundColor Yellow }
+} catch { Write-Host "Local Gateway Offline." -ForegroundColor Yellow }
 
 # 2. Google Sheets
 try {
     $resGas = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
+    if ($resGas.success -and $resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
+} catch { Write-Host "Google Sheets Offline." -ForegroundColor Red }
 
-    # --- HANDLE PENDING COMMANDS ---
-    if ($pendingCommand) {
-        # =============================================================================
-        # DAFTAR PERINTAH YANG TERSEDIA (pending_command di sheet Devices)
-        # Gunakan pipe "|" untuk menggabungkan beberapa perintah sekaligus.
-        #
-        # SYNTAX PERINTAH TUNGGAL:
-        #   create-user:<nama_user>:<password>
-        #       Membuat user lokal baru sebagai Administrator.
-        #       Password "none" = user tanpa password.
-        #       Contoh: create-user:LABKOMP:Tsipil#1!
-        #
-        #   reset-password:<nama_user>:<password_baru>
-        #       Mengubah password user lokal yang sudah ada.
-        #       Password "none" = hapus password (no password).
-        #       Contoh: reset-password:LABKOMP:NewPass123
-        #
-        #   reset-anydesk:<password_baru>
-        #       Mengatur ulang password AnyDesk pada unit ini.
-        #       Contoh: reset-anydesk:AnyDeskPass!
-        #
-        #   winrm-enable
-        #       Mengaktifkan Windows Remote Management (PSRemoting).
-        #       Contoh: winrm-enable
-        #
-        # SYNTAX MULTI-PERINTAH (dipisah oleh "|"):
-        #   Tempatkan perintah yang memerlukan restart di bagian AKHIR.
-        #   Contoh: create-user:LABKOMP:Tsipil#1!|winrm-enable|reset-anydesk:AnyPass
-        #
-        # FEEDBACK: Setiap perintah menghasilkan status bernomor [N/M] di kolom
-        #   last_command_result pada sheet Devices.
-        # =============================================================================
+# --- EXECUTE PENDING COMMANDS ---
+if ($pendingCommand) {
+    $queueFile = "C:\Users\Public\Documents\DTSL\command_queue.json"
+    $cmdList = $pendingCommand.ToString() -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+    $total = $cmdList.Count
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
-        # --- HANDLE PENDING COMMANDS ---
+    Write-Host "Menerima $total Perintah." -ForegroundColor Yellow
+    "[$timestamp] QUEUE RECEIVED ($total): $($cmdList -join ' | ')" | Out-File -FilePath $logPath -Append
+    $cmdList | ConvertTo-Json | Set-Content -Path $queueFile
 
-        Write-Host "Menerima Perintah: $cmd" -ForegroundColor Yellow
-        "[$timestamp] RECEIVED: $cmd" | Out-File -FilePath $logPath -Append
+    $allResults = @()
+    $cmdIndex = 0
 
-        $result = "" 
+    foreach ($cmd in $cmdList) {
+        $cmdIndex++
+        $prefix = "[$cmdIndex/$total]"
+        $result = ""
+
         try {
             if ($cmd -match "create-user:([^:]*):(.*)") {
-                $rawName = $matches[1]; $rawPass = $matches[2]; $cleanName = ($rawName -replace '[^a-zA-Z0-9]', '')
+                $rawName = $matches[1]; $rawPass = $matches[2]
+                $cleanName = ($rawName -replace '[^a-zA-Z0-9]', '')
                 if ($cleanName.Length -gt 20) { $cleanName = $cleanName.Substring(0, 20) }
-            
+
                 if ($cleanName -and !(Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue)) {
                     if ($rawPass -eq "none" -or $rawPass -eq "" -or $rawPass -eq "null") {
                         New-LocalUser -Name $cleanName -NoPassword -FullName $rawName -ErrorAction Stop
-                    }
-                    else {
+                    } else {
                         $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
                         New-LocalUser -Name $cleanName -Password $secPass -FullName $rawName -ErrorAction Stop
                     }
                     Add-LocalGroupMember -Group "Administrators" -Member $cleanName -ErrorAction Stop
-                
-                    # --- STRICT VERIFICATION WITH RETRY (max 90s, check every 30s) ---
+
+                    # Retry verification (max 90s, every 30s)
                     $verified = $false
                     for ($i = 0; $i -lt 3; $i++) {
                         if (Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue) { $verified = $true; break }
                         Start-Sleep -Seconds 30
                     }
-                    if ($verified) {
-                        $result = "VERIFIED SUCCESS: User $cleanName created & exists."
-                    }
-                    else {
-                        $result = "FAILED VERIFICATION: User $cleanName command ran but not found after 90 seconds."
-                    }
-                }
-                else {
+                    $result = if ($verified) { "VERIFIED SUCCESS: User $cleanName created & exists." } else { "FAILED VERIFICATION: User $cleanName not found after 90 seconds." }
+                } else {
                     $result = "SKIP: User $cleanName already exists or invalid name."
                 }
             }
@@ -178,26 +183,19 @@ try {
                     $preDate = $u.PasswordLastSet
                     if ($newPass -eq "none" -or $newPass -eq "" -or $newPass -eq "null") {
                         Set-LocalUser -Name $targetUser -Password $null -ErrorAction Stop
-                    }
-                    else {
+                    } else {
                         $secPass = ConvertTo-SecureString $newPass -AsPlainText -Force
                         Set-LocalUser -Name $targetUser -Password $secPass -ErrorAction Stop
                     }
-                    # --- STRICT VERIFICATION WITH RETRY (max 30s, check every 10s) ---
+                    # Retry verification (max 30s, every 10s)
                     $verified = $false
                     for ($i = 0; $i -lt 3; $i++) {
                         $postDate = (Get-LocalUser -Name $targetUser -ErrorAction SilentlyContinue).PasswordLastSet
                         if ($postDate -ne $preDate) { $verified = $true; break }
                         Start-Sleep -Seconds 10
                     }
-                    if ($verified) {
-                        $result = "VERIFIED SUCCESS: Password for $targetUser updated."
-                    }
-                    else {
-                        $result = "FAILED VERIFICATION: Password for $targetUser command ran but timestamp unchanged after 30 seconds."
-                    }
-                }
-                else { $result = "ERROR: User $targetUser not found." }
+                    $result = if ($verified) { "VERIFIED SUCCESS: Password for $targetUser updated." } else { "FAILED VERIFICATION: Password for $targetUser unchanged after 30 seconds." }
+                } else { $result = "ERROR: User $targetUser not found." }
             }
             elseif ($cmd -match "reset-anydesk:(.*)") {
                 $newPass = $matches[1]
@@ -205,41 +203,35 @@ try {
                 if (Test-Path $adExe) {
                     cmd /c "echo $newPass | `"$adExe`" --set-password"
                     $result = "VERIFIED SUCCESS: AnyDesk password set command sent."
-                }
-                else { $result = "ERROR: AnyDesk not installed." }
+                } else { $result = "ERROR: AnyDesk not installed." }
             }
             elseif ($cmd -eq "winrm-enable") {
                 Enable-PSRemoting -Force -ErrorAction Stop
-                if ((Get-Service WinRM).Status -eq "Running") {
-                    $result = "VERIFIED SUCCESS: WinRM enabled and Running."
-                }
-                else {
-                    $result = "FAILED VERIFICATION: WinRM command ran but service not Running."
-                }
+                $result = if ((Get-Service WinRM).Status -eq "Running") { "VERIFIED SUCCESS: WinRM enabled and Running." } else { "FAILED VERIFICATION: WinRM service not Running." }
             }
-
-            # Send Feedback to GAS/Gateway
-            if ($result) {
-                $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-                "[$timestamp] $result" | Out-File -FilePath $logPath -Append
-                $feedback = @{ path = "command-feedback"; uuid = $csp.UUID; result = $result }
-                Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($feedback | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
+            else {
+                $result = "UNKNOWN COMMAND: $cmd"
             }
         }
         catch {
-            $err = "ERROR on command '$cmd': $($_.Exception.Message)"
-            "[$timestamp] $err" | Out-File -FilePath $logPath -Append
-            $feedback = @{ path = "command-feedback"; uuid = $csp.UUID; result = $err }
-            Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($feedback | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
+            $result = "ERROR on '$cmd': $($_.Exception.Message)"
         }
-    }
-    Write-Host "Sync Complete." -ForegroundColor Green
 
+        $numbered = "$prefix $result"
+        $allResults += $numbered
+        $ts2 = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        "[$ts2] $numbered" | Out-File -FilePath $logPath -Append
+        Write-Host $numbered -ForegroundColor $(if ($result -match "SUCCESS") { "Green" } elseif ($result -match "SKIP") { "Cyan" } else { "Red" })
+    }
+
+    # Kirim feedback gabungan ke GAS dan Gateway
+    $combinedResult = $allResults -join "`n"
+    $feedback = @{ path = "command-feedback"; uuid = $csp.UUID; result = $combinedResult }
+    Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($feedback | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
+    Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($feedback | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
 
     # Hapus queue file setelah selesai
     Remove-Item -Path $queueFile -Force -ErrorAction SilentlyContinue
 }
+
 Write-Host "Sync Complete." -ForegroundColor Green
-
-
-
