@@ -1,5 +1,5 @@
 # ======================================================================
-# SCRIPT: lab-logic.ps1 (Update 2026-03-26)
+# SCRIPT: lab-logic.ps1 (Update 2026-03-24 - Final Robust Edition)
 # FUNGSI: Heartbeat, Inventory, & Command Execution via Local Gateway/Cloud
 # ======================================================================
 # =============================================================================
@@ -33,8 +33,9 @@
 #   last_command_result pada sheet Devices.
 # =============================================================================
 
+
 # --- CONFIGURATION ---
-$gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec"
+$gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec" 
 $localGatewayUrl = "http://10.47.106.9:5000/inventory"
 $hostname = [System.Net.Dns]::GetHostName()
 $hashFile = "C:\Users\Public\Documents\DTSL\dtsl_sw_hash.txt"
@@ -52,7 +53,7 @@ $memArray = Get-CimInstance Win32_PhysicalMemoryArray
 $memSum = (Get-CimInstance Win32_PhysicalMemory | Measure-Object Capacity -Sum).Sum / 1GB
 $csp = Get-CimInstance Win32_ComputerSystemProduct
 $chassis = Get-CimInstance Win32_SystemEnclosure
-$chassisMap = @{ 3="Desktop"; 4="Low Profile Desktop"; 8="Portable"; 9="Laptop"; 10="Notebook"; 13="All in One" }
+$chassisMap = @{ 3 = "Desktop"; 4 = "Low Profile Desktop"; 8 = "Portable"; 9 = "Laptop"; 10 = "Notebook"; 13 = "All in One" }
 $systemType = if ($chassis.ChassisTypes[0]) { $chassisMap[[int]$chassis.ChassisTypes[0]] } else { "Unknown" }
 
 # --- GET NETWORK INFO ---
@@ -90,14 +91,15 @@ $tvPath64 = "HKLM:\SOFTWARE\TeamViewer"
 $tvPath32 = "HKLM:\SOFTWARE\WOW6432Node\TeamViewer"
 if (Test-Path $tvPath64) {
     try { $teamviewerId = (Get-ItemProperty -Path $tvPath64 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
-} elseif (Test-Path $tvPath32) {
+}
+elseif (Test-Path $tvPath32) {
     try { $teamviewerId = (Get-ItemProperty -Path $tvPath32 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
 }
 
 # --- GET INSTALLED SOFTWARE ---
 $paths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
 $swRaw = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null }
-$swList = $swRaw | Select-Object @{n='name';e={$_.DisplayName}}, @{n='version';e={$_.DisplayVersion}}, @{n='vendor';e={$_.Publisher}}, @{n='installDate';e={$_.InstallDate}}
+$swList = $swRaw | Select-Object @{n = 'name'; e = { $_.DisplayName } }, @{n = 'version'; e = { $_.DisplayVersion } }, @{n = 'vendor'; e = { $_.Publisher } }, @{n = 'installDate'; e = { $_.InstallDate } }
 
 # Hash sync check
 $currentHash = ($swList | ConvertTo-Json | Out-String).GetHashCode().ToString()
@@ -118,18 +120,22 @@ if ($sendSoftware) { $payload.softwareList = $swList }
 
 # --- SYNC (Dual-Sync) ---
 $pendingCommand = $null
-
-# 1. Local Gateway (sync data only, no command)
+# 1. Local Gateway (primary — forwards heartbeat to GAS and relays pendingCommand)
 try {
-    Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5 -ErrorAction SilentlyContinue
-} catch { Write-Host "Local Gateway Offline." -ForegroundColor Yellow }
+    $resLocal = Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5
+    if ($resLocal.success -and $resLocal.pendingCommand) { $pendingCommand = $resLocal.pendingCommand }
+}
+catch { Write-Host "Local Gateway Offline." -ForegroundColor Yellow }
 
+# 2. Google Sheets (fallback — hanya dipanggil jika gateway offline atau tidak ada command)
+if (-not $pendingCommand) {
+    try {
+        $resGas = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
+        if ($resGas.success -and $resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
+    }
+    catch { Write-Host "Google Sheets Offline." -ForegroundColor Red }
+}
 
-# 2. Google Sheets
-try {
-    $resGas = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
-    if ($resGas.success -and $resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
-} catch { Write-Host "Google Sheets Offline." -ForegroundColor Red }
 
 # --- EXECUTE PENDING COMMANDS ---
 if ($pendingCommand) {
@@ -159,7 +165,8 @@ if ($pendingCommand) {
                 if ($cleanName -and !(Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue)) {
                     if ($rawPass -eq "none" -or $rawPass -eq "" -or $rawPass -eq "null") {
                         New-LocalUser -Name $cleanName -NoPassword -FullName $rawName -ErrorAction Stop
-                    } else {
+                    }
+                    else {
                         $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
                         New-LocalUser -Name $cleanName -Password $secPass -FullName $rawName -ErrorAction Stop
                     }
@@ -172,7 +179,8 @@ if ($pendingCommand) {
                         Start-Sleep -Seconds 30
                     }
                     $result = if ($verified) { "VERIFIED SUCCESS: User $cleanName created & exists." } else { "FAILED VERIFICATION: User $cleanName not found after 90 seconds." }
-                } else {
+                }
+                else {
                     $result = "SKIP: User $cleanName already exists or invalid name."
                 }
             }
@@ -183,7 +191,8 @@ if ($pendingCommand) {
                     $preDate = $u.PasswordLastSet
                     if ($newPass -eq "none" -or $newPass -eq "" -or $newPass -eq "null") {
                         Set-LocalUser -Name $targetUser -Password $null -ErrorAction Stop
-                    } else {
+                    }
+                    else {
                         $secPass = ConvertTo-SecureString $newPass -AsPlainText -Force
                         Set-LocalUser -Name $targetUser -Password $secPass -ErrorAction Stop
                     }
@@ -195,7 +204,8 @@ if ($pendingCommand) {
                         Start-Sleep -Seconds 10
                     }
                     $result = if ($verified) { "VERIFIED SUCCESS: Password for $targetUser updated." } else { "FAILED VERIFICATION: Password for $targetUser unchanged after 30 seconds." }
-                } else { $result = "ERROR: User $targetUser not found." }
+                }
+                else { $result = "ERROR: User $targetUser not found." }
             }
             elseif ($cmd -match "reset-anydesk:(.*)") {
                 $newPass = $matches[1]
@@ -203,7 +213,8 @@ if ($pendingCommand) {
                 if (Test-Path $adExe) {
                     cmd /c "echo $newPass | `"$adExe`" --set-password"
                     $result = "VERIFIED SUCCESS: AnyDesk password set command sent."
-                } else { $result = "ERROR: AnyDesk not installed." }
+                }
+                else { $result = "ERROR: AnyDesk not installed." }
             }
             elseif ($cmd -eq "winrm-enable") {
                 Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction Stop
