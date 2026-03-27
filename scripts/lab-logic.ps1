@@ -64,7 +64,7 @@ $chassisMap = @{ 3 = "Desktop"; 4 = "Low Profile Desktop"; 8 = "Portable"; 9 = "
 $systemType = if ($chassis.ChassisTypes[0]) { $chassisMap[[int]$chassis.ChassisTypes[0]] } else { "Unknown" }
 
 # --- GET NETWORK INFO ---
-$ips = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" }).IPAddress -join ", "
+$ips = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254*" }).IPAddress -join ", "
 $macs = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" }).MacAddress -join ", "
 
 # --- CHECK PENDING REBOOT ---
