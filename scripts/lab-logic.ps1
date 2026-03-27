@@ -170,37 +170,46 @@ if ($pendingCommand) {
                 $cleanName = ($rawName -replace '[^a-zA-Z0-9]', '')
                 if ($cleanName.Length -gt 20) { $cleanName = $cleanName.Substring(0, 20) }
 
-                if ($cleanName -and !(Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue)) {
-                    if ($rawPass -eq "none" -or $rawPass -eq "" -or $rawPass -eq "null") {
-                        New-LocalUser -Name $cleanName -NoPassword -FullName $rawName -ErrorAction Stop
+                if ($cleanName) {
+                    # Cek status keberadaan user
+                    $userObj = Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue
+                    
+                    if (!$userObj) {
+                        # Create User
+                        if ($rawPass -eq "none" -or $rawPass -eq "" -or $rawPass -eq "null") {
+                            New-LocalUser -Name $cleanName -NoPassword -FullName $rawName -ErrorAction Stop
+                        }
+                        else {
+                            $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
+                            New-LocalUser -Name $cleanName -Password $secPass -FullName $rawName -ErrorAction Stop
+                        }
+                        Add-LocalGroupMember -Group "Administrators" -Member $cleanName -ErrorAction Stop
+
+                        # Verification loop
+                        for ($i = 0; $i -lt 3; $i++) {
+                            $userObj = Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue
+                            if ($userObj) { break }
+                            Start-Sleep -Seconds 30
+                        }
+                        $result = if ($userObj) { "VERIFIED SUCCESS: User $cleanName created." } else { "FAILED: User not found." }
                     }
                     else {
-                        $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
-                        New-LocalUser -Name $cleanName -Password $secPass -FullName $rawName -ErrorAction Stop
+                        $result = "SKIP: User $cleanName already exists."
                     }
-                    Add-LocalGroupMember -Group "Administrators" -Member $cleanName -ErrorAction Stop
 
-                    # Retry verification (max 90s, every 30s)
-                    $verified = $false
-                    for ($i = 0; $i -lt 3; $i++) {
-                        if (Get-LocalUser -Name $cleanName -ErrorAction SilentlyContinue) { $verified = $true; break }
-                        Start-Sleep -Seconds 30
-                    }
-                    $result = if ($verified) { "VERIFIED SUCCESS: User $cleanName created & exists." } else { "FAILED VERIFICATION: User $cleanName not found after 90 seconds." }
-
-                    # --- AUTO INIT PROFILE ---
-                    if ($verified -and $rawPass -ne "none" -and -not (Test-Path "C:\Users\$cleanName")) {
+                    # --- AUTO INIT PROFILE (Unified) ---
+                    # Dijalankan hanya jika user ada (baru/lama), password tersedia, dan folder belum ada.
+                    if ($userObj -and $rawPass -ne "none" -and $rawPass -ne "" -and $rawPass -ne "null" -and -not (Test-Path "C:\Users\$cleanName")) {
                         try {
                             $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
                             $cred = New-Object System.Management.Automation.PSCredential($cleanName, $secPass)
                             Start-Process "cmd.exe" -ArgumentList "/c exit" -Credential $cred -WindowStyle Hidden
                             $result += " Profile initialization triggered."
-                        } catch { $result += " Profile init failed: $($_.Exception.Message)" }
+                        }
+                        catch { $result += " Profile init failed: $($_.Exception.Message)" }
                     }
                 }
-                else {
-                    $result = "SKIP: User $cleanName already exists or invalid name."
-                }
+                else { $result = "ERROR: Nama user tidak valid." }
             }
             elseif ($cmd -match "reset-password:([^:]*):(.*)") {
                 $targetUser = $matches[1]; $newPass = $matches[2]
