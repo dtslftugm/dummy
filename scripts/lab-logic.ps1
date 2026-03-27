@@ -187,6 +187,16 @@ if ($pendingCommand) {
                         Start-Sleep -Seconds 30
                     }
                     $result = if ($verified) { "VERIFIED SUCCESS: User $cleanName created & exists." } else { "FAILED VERIFICATION: User $cleanName not found after 90 seconds." }
+
+                    # --- AUTO INIT PROFILE ---
+                    if ($verified -and $rawPass -ne "none" -and -not (Test-Path "C:\Users\$cleanName")) {
+                        try {
+                            $secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
+                            $cred = New-Object System.Management.Automation.PSCredential($cleanName, $secPass)
+                            Start-Process "cmd.exe" -ArgumentList "/c exit" -Credential $cred -WindowStyle Hidden
+                            $result += " Profile initialization triggered."
+                        } catch { $result += " Profile init failed: $($_.Exception.Message)" }
+                    }
                 }
                 else {
                     $result = "SKIP: User $cleanName already exists or invalid name."
@@ -225,8 +235,17 @@ if ($pendingCommand) {
                 else { $result = "ERROR: AnyDesk not installed." }
             }
             elseif ($cmd -eq "winrm-enable") {
+                # Enable PSRemoting
                 Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction Stop
-                $result = if ((Get-Service WinRM).Status -eq "Running") { "VERIFIED SUCCESS: WinRM enabled and Running." } else { "FAILED VERIFICATION: WinRM service not Running." }
+                # Fix LocalAccountTokenFilterPolicy for Workgroup remote admin
+                $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+                Set-ItemProperty -Path $regPath -Name "LocalAccountTokenFilterPolicy" -Value 1 -Type DWord -Force
+                
+                if ((Get-Service WinRM).Status -eq "Running") {
+                    $result = "VERIFIED SUCCESS: WinRM enabled, Running, & Policy set."
+                } else {
+                    $result = "FAILED VERIFICATION: WinRM service not Running."
+                }
             }
             elseif ($cmd -match "rename-computer:(.*)") {
                 $newName = $matches[1].Trim() -replace '[^a-zA-Z0-9\-]', ''
