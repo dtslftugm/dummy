@@ -114,6 +114,25 @@ $oldHash = if (Test-Path $hashFile) { Get-Content $hashFile } else { "" }
 $sendSoftware = if ($currentHash -ne $oldHash) { $true } else { $false }
 if ($sendSoftware) { Set-Content -Path $hashFile -Value $currentHash }
 
+# --- DETECT HEAVY PROCESSES (>10% CPU) ---
+$cpuSample1 = Get-Process | Select-Object Name, CPU
+Start-Sleep -Seconds 2
+$cpuSample2 = Get-Process | Select-Object Name, CPU
+$heavyApps = @()
+foreach ($p1 in $cpuSample1) {
+    $p2 = $cpuSample2 | Where-Object { $_.Name -eq $p1.Name } | Select-Object -First 1
+    if ($p1 -and $p2) {
+        $usage = [math]::Round(($p2.CPU - $p1.CPU) / 2 / $env:NUMBER_OF_PROCESSORS * 100, 1)
+        if ($usage -gt 10 -and $p1.Name -notmatch "Idle|System") {
+            $heavyApps += "$($p1.Name) ($usage%)"
+        }
+    }
+}
+if ($heavyApps.Count -gt 0) {
+    $debugPayload = @{ path = "record-debug"; action = "HeavyProcesses"; payload = @{ name = $hostname; list = ($heavyApps -join ", "); timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") } }
+    Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($debugPayload | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
+}
+
 # --- PREPARE PAYLOAD ---
 $payload = @{
     path = "record-activity"; name = $hostname; status = $workStatus; operating_system_name = $os.Caption
