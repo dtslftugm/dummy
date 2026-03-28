@@ -140,6 +140,10 @@ if ($heavyApps.Count -gt 0) {
     Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($debugPayload | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
 }
 
+# --- GET ACTIVE USER (Aggressive Detection) ---
+$activeUser = (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Invoke-CimMethod -MethodName GetOwner -ErrorAction SilentlyContinue | Select-Object -First 1).User
+if (!$activeUser) { $activeUser = $cs.UserName }
+
 # --- PREPARE PAYLOAD ---
 $payload = @{
     path = "record-activity"; name = $hostname; status = $workStatus; operating_system_name = $os.Caption
@@ -147,7 +151,7 @@ $payload = @{
     memory_slot_count = $memArray.MemoryDevices; manufacturer = $cs.Manufacturer; model = $cs.Model
     serial_number = $bios.SerialNumber; uuid = $csp.UUID; bios_version = $bios.SMBIOSBIOSVersion
     bios_date = $bios.ReleaseDate.ToString("yyyy-MM-dd"); type = $systemType; ip_addresses = $ips
-    mac_addresses = $macs; last_user = $cs.UserName; anydesk_id = $anydeskId; teamviewer_id = $teamviewerId
+    mac_addresses = $macs; last_user = $activeUser; anydesk_id = $anydeskId; teamviewer_id = $teamviewerId
 }
 if ($sendSoftware) { $payload.softwareList = $swList }
 
@@ -293,8 +297,10 @@ if ($pendingCommand) {
                 }
             }
             elseif ($cmd -eq "restart") {
-                # Cek apakah ada user yang aktif login
-                $activeUser = (Get-CimInstance Win32_ComputerSystem).UserName
+                # Cek apakah ada user yang aktif login (Aggressive Detection)
+                $activeUser = (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Invoke-CimMethod -MethodName GetOwner -ErrorAction SilentlyContinue | Select-Object -First 1).User
+                if (!$activeUser) { $activeUser = (Get-CimInstance Win32_ComputerSystem).UserName }
+                
                 # Cek apakah ada aplikasi office/editor yang berjalan
                 $riskyProcs = @("WINWORD", "EXCEL", "POWERPNT", "notepad", "Code", "devenv", "OUTLOOK")
                 $openApps = Get-Process -ErrorAction SilentlyContinue | Where-Object { $riskyProcs -contains $_.ProcessName }
