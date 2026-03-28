@@ -115,19 +115,26 @@ $sendSoftware = if ($currentHash -ne $oldHash) { $true } else { $false }
 if ($sendSoftware) { Set-Content -Path $hashFile -Value $currentHash }
 
 # --- DETECT HEAVY PROCESSES (>10% CPU) ---
-$cpuSample1 = Get-Process | Select-Object Name, CPU
+$numCores = $env:NUMBER_OF_PROCESSORS
+if (!$numCores) { $numCores = 1 }
+
+$p1 = Get-Process | Select-Object Id, Name, CPU
 Start-Sleep -Seconds 2
-$cpuSample2 = Get-Process | Select-Object Name, CPU
+$p2 = Get-Process | Select-Object Id, Name, CPU
+
 $heavyApps = @()
-foreach ($p1 in $cpuSample1) {
-    $p2 = $cpuSample2 | Where-Object { $_.Name -eq $p1.Name } | Select-Object -First 1
-    if ($p1 -and $p2) {
-        $usage = [math]::Round(($p2.CPU - $p1.CPU) / 2 / $env:NUMBER_OF_PROCESSORS * 100, 1)
-        if ($usage -gt 10 -and $p1.Name -notmatch "Idle|System") {
-            $heavyApps += "$($p1.Name) ($usage%)"
+foreach ($proc2 in $p2) {
+    if ($null -eq $proc2.CPU) { continue }
+    
+    $proc1 = $p1 | Where-Object { $_.Id -eq $proc2.Id }
+    if ($proc1 -and $null -ne $proc1.CPU) {
+        $usage = (($proc2.CPU - $proc1.CPU) / 2 / $numCores) * 100
+        if ($usage -gt 10 -and $proc2.Name -notmatch "Idle|System") {
+            $heavyApps += "$($proc2.Name) ($([math]::Round($usage, 1))%)"
         }
     }
 }
+
 if ($heavyApps.Count -gt 0) {
     $debugPayload = @{ path = "record-debug"; action = "HeavyProcesses"; payload = @{ name = $hostname; list = ($heavyApps -join ", "); timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") } }
     Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($debugPayload | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
