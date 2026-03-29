@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Inventory - DTSL FT UGM</title>
+    <!-- Bootstrap 5.3 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --emerald-600: #059669;
+            --emerald-700: #047857;
+            --emerald-800: #065f46;
+            --slate-50: #f8fafc;
+            --slate-100: #f1f5f9;
+            --slate-800: #1e293b;
+            --slate-900: #0f172a;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--slate-50);
+            color: var(--slate-900);
+        }
+
+        .outfit { font-family: 'Outfit', sans-serif; }
+
+        .navbar {
+            background: var(--slate-900);
+            border-bottom: 3px solid var(--emerald-600);
+        }
+
+        .card {
+            border: none;
+            border-radius: 16px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            transition: transform 0.2s ease;
+        }
+
+        .card:hover { transform: translateY(-2px); }
+
+        .status-badge {
+            padding: 0.4rem 0.8rem;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+        }
+
+        .btn-emerald {
+            background: var(--emerald-600);
+            color: white;
+            border-radius: 50px;
+            font-weight: 600;
+            padding: 0.6rem 1.2rem;
+            border: none;
+        }
+
+        .btn-emerald:hover { background: var(--emerald-700); color: white; }
+
+        .sidebar {
+            background: white;
+            min-height: 100vh;
+            border-right: 1px solid var(--slate-100);
+        }
+
+        .nav-link {
+            color: var(--slate-800);
+            padding: 1rem 1.5rem;
+            font-weight: 500;
+            border-radius: 12px;
+            margin: 0.2rem 1rem;
+        }
+
+        .nav-link.active {
+            background: var(--emerald-600);
+            color: white;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.8);
+            backdrop-filter: blur(4px);
+            z-index: 9999;
+            display: none;
+            align-items: center; justify-content: center;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar { display: none; }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="loading" class="loading-overlay">
+        <div class="text-center">
+            <div class="spinner-border text-success" role="status"></div>
+            <p class="mt-2 fw-bold text-emerald-800 outfit">Syncing with Cloud...</p>
+        </div>
+    </div>
+
+    <!-- Login Modal (Simple) -->
+    <div id="login-overlay" class="loading-overlay" style="background: var(--slate-900); display: flex;">
+        <div class="card p-4 shadow-lg text-center" style="width: 100%; max-width: 400px; border-radius: 24px;">
+            <h3 class="fw-bold outfit text-emerald-600 mb-3">Inventory Access</h3>
+            <p class="text-muted small mb-4">Silakan masukkan password admin inventaris</p>
+            <input type="password" id="auth-password" class="form-control mb-3 rounded-pill text-center" placeholder="••••••••">
+            <button class="btn btn-emerald w-100" onclick="handleLogin()">Login Dashboard</button>
+        </div>
+    </div>
+
+    <div class="d-flex">
+        <!-- Sidebar -->
+        <div class="sidebar d-none d-md-block" style="width: 280px;">
+            <div class="p-4 text-center border-bottom mb-4">
+                <h4 class="outfit fw-bold text-emerald-700">DTSL Inventory</h4>
+                <p class="text-muted small mb-0">v2.0 Direct-to-Cloud</p>
+            </div>
+            <nav class="nav flex-column">
+                <a class="nav-link active" href="#"><i class="bi bi-grid-fill me-2"></i> All Devices</a>
+                <a class="nav-link" href="#"><i class="bi bi-shield-check me-2"></i> Security Status</a>
+                <a class="nav-link" href="#"><i class="bi bi-gear-fill me-2"></i> Setup Tools</a>
+                <a class="nav-link" href="admin.html"><i class="bi bi-arrow-left-circle me-2"></i> Pelayanan App</a>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-grow-1 p-4 overflow-auto" style="height: 100vh;">
+            <header class="d-flex justify-content-between align-items-center mb-5">
+                <div>
+                    <h2 class="outfit fw-bold mb-0">Hardware Dashboard</h2>
+                    <p class="text-muted mb-0">Monitoring PC Lab secara real-time</p>
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-secondary rounded-pill" onclick="fetchDevices()"><i class="bi bi-arrow-clockwise"></i></button>
+                    <button class="btn btn-emerald" onclick="showWOLModal()"><i class="bi bi-lightning-fill"></i> Remote Wake</button>
+                </div>
+            </header>
+
+            <!-- Stats Grid -->
+            <div class="row g-4 mb-5">
+                <div class="col-md-3">
+                    <div class="card p-4">
+                        <small class="text-muted text-uppercase fw-bold">Total Unit</small>
+                        <h2 id="stat-total" class="outfit fw-bold mb-0">0</h2>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card p-4" style="border-left: 5px solid #10b981;">
+                        <small class="text-muted text-uppercase fw-bold">Online</small>
+                        <h2 id="stat-online" class="outfit fw-bold mb-0 text-success">0</h2>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card p-4" style="border-left: 5px solid #f59e0b;">
+                        <small class="text-muted text-uppercase fw-bold">Maintenance</small>
+                        <h2 id="stat-alert" class="outfit fw-bold mb-0 text-warning">0</h2>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card p-4" style="border-left: 5px solid #ef4444;">
+                        <small class="text-muted text-uppercase fw-bold">Critical Alert</small>
+                        <h2 id="stat-offline" class="outfit fw-bold mb-0 text-danger">0</h2>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table Card -->
+            <div class="card border-0">
+                <div class="p-4 border-bottom d-flex justify-content-between align-items-center bg-white" style="border-radius: 16px 16px 0 0;">
+                    <h5 class="fw-bold outfit mb-0">📋 Daftar Perangkat</h5>
+                    <div class="input-group" style="max-width: 300px;">
+                        <span class="input-group-text bg-light border-0"><i class="bi bi-search"></i></span>
+                        <input type="text" id="searchInput" class="form-control bg-light border-0" placeholder="Cari PC atau IP...">
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr class="small text-uppercase fw-bold text-muted">
+                                <th class="ps-4">Host Name</th>
+                                <th>Status</th>
+                                <th>IP Address</th>
+                                <th>OS / Processor</th>
+                                <th>Remote Tools</th>
+                                <th class="text-end pe-4">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="deviceTable">
+                            <!-- Rows injected here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Device Details Modal -->
+    <div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0" style="border-radius: 24px;">
+                <div class="modal-header border-0 pb-0 pt-4 px-4">
+                    <h5 class="outfit fw-bold">Detail Perangkat: <span id="modal-hostname" class="text-emerald-700"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="row g-4">
+                        <div class="col-md-6">
+                            <h6 class="text-uppercase small fw-bold text-muted mb-3">Hardware Info</h6>
+                            <ul class="list-unstyled small">
+                                <li class="mb-2"><strong>Manufacturer:</strong> <span id="modal-manu">-</span></li>
+                                <li class="mb-2"><strong>Model:</strong> <span id="modal-model">-</span></li>
+                                <li class="mb-2"><strong>CPU:</strong> <span id="modal-cpu">-</span></li>
+                                <li class="mb-2"><strong>RAM:</strong> <span id="modal-ram">-</span></li>
+                                <li class="mb-2"><strong>SN:</strong> <span id="modal-sn">-</span></li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6 border-start ps-4">
+                            <h6 class="text-uppercase small fw-bold text-muted mb-3">Remote Identification</h6>
+                            <p class="small mb-1"><strong>RustDesk ID:</strong> <span id="modal-rustdesk" class="text-primary fw-bold">-</span></p>
+                            <p class="small mb-1"><strong>AnyDesk ID:</strong> <span id="modal-anydesk">-</span></p>
+                            <p class="small mb-4"><strong>MAC Address:</strong> <code id="modal-mac">-</code></p>
+                            
+                            <h6 class="text-uppercase small fw-bold text-muted mb-2">Remote Action (Pending Command)</h6>
+                            <div class="input-group input-group-sm mb-3">
+                                <select id="command-select" class="form-select">
+                                    <option value="">-- Pilih Perintah --</option>
+                                    <option value="restart">Restart Unit (Idle only)</option>
+                                    <option value="winrm-enable">Enable PSRemoting</option>
+                                    <option value="reset-anydesk:AdminPass123">Reset Password AnyDesk</option>
+                                </select>
+                                <button class="btn btn-emerald" onclick="submitCommand()">Kirim</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- WOL Modal -->
+    <div class="modal fade" id="wolModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0" style="border-radius: 24px;">
+                <div class="modal-body p-5 text-center">
+                    <div class="display-1 text-emerald-600 mb-4"><i class="bi bi-lightning-charge-fill"></i></div>
+                    <h3 class="outfit fw-bold mb-3">Remote Wake Up (via Gateway)</h3>
+                    <p class="text-muted mb-4">Masukkan MAC Address perangkat lab untuk mengirimkan Magic Packet via LAN Gateway.</p>
+                    <input type="text" id="wol-mac" class="form-control text-center mb-3 rounded-pill" placeholder="AA:BB:CC:DD:EE:FF">
+                    <button class="btn btn-emerald w-100 mb-2" onclick="sendWOL()">Kirim Sinyal Bangun</button>
+                    <button class="btn btn-link text-muted small" data-bs-dismiss="modal">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="liveToast" class="toast border-0 shadow-lg" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header bg-emerald-700 text-white">
+                <strong class="me-auto">System Notification</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body" id="toast-body">Message here...</div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/inventory.js"></script>
+</body>
+
+</html>
