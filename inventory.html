@@ -186,7 +186,10 @@
                     <table class="table table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr class="small text-uppercase fw-bold text-muted">
-                                <th class="ps-4">Host Name</th>
+                                <th class="ps-4" style="width: 40px;">
+                                    <input type="checkbox" id="selectAll" class="form-check-input">
+                                </th>
+                                <th>Host Name</th>
                                 <th>Status</th>
                                 <th>IP Address</th>
                                 <th>OS / Processor</th>
@@ -200,10 +203,55 @@
                     </table>
                 </div>
             </div>
+            
+            <!-- Bulk Action Bar (Floating) -->
+            <div id="bulkBar" class="position-fixed bottom-0 start-50 translate-middle-x mb-4 bg-slate-900 text-white p-3 rounded-pill shadow-lg d-none" style="z-index: 1050; min-width: 400px;">
+                <div class="d-flex align-items-center justify-content-between px-3">
+                    <span class="fw-bold"><span id="selectedCount">0</span> selected</span>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-emerald" onclick="openBulkModal()">Bulk Action</button>
+                        <button class="btn btn-sm btn-outline-light border-0" onclick="clearSelection()"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
-    <!-- Device Details Modal -->
+    <!-- Command Modal (Generic for Single & Bulk) -->
+    <div class="modal fade" id="commandModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 24px;">
+                <div class="modal-header border-0 pb-0 pt-4 px-4">
+                    <h5 class="outfit fw-bold">Remote Command: <span id="command-target-name" class="text-emerald-700"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted text-uppercase">Jenis Perintah</label>
+                        <select id="command-type" class="form-select rounded-pill" onchange="updateCommandInputs()">
+                            <option value="">-- Pilih Perintah --</option>
+                            <option value="create-user">Create Local User</option>
+                            <option value="reset-password">Reset User Password</option>
+                            <option value="reset-anydesk">Reset AnyDesk Password</option>
+                            <option value="winrm-enable">Enable WinRM (PSRemoting)</option>
+                            <option value="rename-computer">Rename Computer (Single only)</option>
+                            <option value="restart">Restart Unit (Idle only)</option>
+                        </select>
+                    </div>
+                    
+                    <div id="command-params" class="bg-light p-3 rounded-4 d-none">
+                        <!-- Dynamic inputs injected here -->
+                    </div>
+                </div>
+                <div class="modal-footer border-0 p-4 pt-0">
+                    <button class="btn btn-emerald w-100 rounded-pill py-2" onclick="executeCommand()">Submit Command</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Device Info Modal (Hardware/Software) -->
     <div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content border-0" style="border-radius: 24px;">
@@ -213,32 +261,24 @@
                 </div>
                 <div class="modal-body p-4">
                     <div class="row g-4">
-                        <div class="col-md-6">
+                        <div class="col-md-7">
                             <h6 class="text-uppercase small fw-bold text-muted mb-3">Hardware Info</h6>
-                            <ul class="list-unstyled small">
-                                <li class="mb-2"><strong>Manufacturer:</strong> <span id="modal-manu">-</span></li>
-                                <li class="mb-2"><strong>Model:</strong> <span id="modal-model">-</span></li>
-                                <li class="mb-2"><strong>CPU:</strong> <span id="modal-cpu">-</span></li>
-                                <li class="mb-2"><strong>RAM:</strong> <span id="modal-ram">-</span></li>
-                                <li class="mb-2"><strong>SN:</strong> <span id="modal-sn">-</span></li>
-                            </ul>
-                        </div>
-                        <div class="col-md-6 border-start ps-4">
-                            <h6 class="text-uppercase small fw-bold text-muted mb-3">Remote Identification</h6>
-                            <p class="small mb-1"><strong>RustDesk ID:</strong> <span id="modal-rustdesk" class="text-primary fw-bold">-</span></p>
-                            <p class="small mb-1"><strong>AnyDesk ID:</strong> <span id="modal-anydesk">-</span></p>
-                            <p class="small mb-4"><strong>MAC Address:</strong> <code id="modal-mac">-</code></p>
-                            
-                            <h6 class="text-uppercase small fw-bold text-muted mb-2">Remote Action (Pending Command)</h6>
-                            <div class="input-group input-group-sm mb-3">
-                                <select id="command-select" class="form-select">
-                                    <option value="">-- Pilih Perintah --</option>
-                                    <option value="restart">Restart Unit (Idle only)</option>
-                                    <option value="winrm-enable">Enable PSRemoting</option>
-                                    <option value="reset-anydesk:AdminPass123">Reset Password AnyDesk</option>
-                                </select>
-                                <button class="btn btn-emerald" onclick="submitCommand()">Kirim</button>
+                            <div class="row g-2 small">
+                                <div class="col-4 text-muted">Manufacturer</div><div class="col-8 fw-bold" id="modal-manu">-</div>
+                                <div class="col-4 text-muted">Model</div><div class="col-8 fw-bold" id="modal-model">-</div>
+                                <div class="col-4 text-muted">CPU</div><div class="col-8" id="modal-cpu">-</div>
+                                <div class="col-4 text-muted">RAM</div><div class="col-8" id="modal-ram">-</div>
+                                <div class="col-4 text-muted">SN</div><div class="col-8 text-monospace" id="modal-sn">-</div>
+                                <div class="col-4 text-muted">IP</div><div class="col-8" id="modal-ip">-</div>
                             </div>
+                        </div>
+                        <div class="col-md-5 border-start ps-4">
+                            <h6 class="text-uppercase small fw-bold text-muted mb-3">Remote Access</h6>
+                            <p class="small mb-1"><strong>RustDesk ID:</strong> <span id="modal-rustdesk" class="text-primary fw-bold">-</span></p>
+                            <p class="small mb-3"><strong>AnyDesk ID:</strong> <span id="modal-anydesk">-</span></p>
+                            
+                            <button class="btn btn-sm btn-emerald w-100 rounded-pill mb-2" onclick="openSingleCommand()">Kirim Perintah</button>
+                            <button class="btn btn-sm btn-outline-secondary w-100 rounded-pill" onclick="copyConfig()">Salin Config</button>
                         </div>
                     </div>
                 </div>
