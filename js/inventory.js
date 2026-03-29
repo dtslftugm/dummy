@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function handleLogin() {
     const pass = document.getElementById('auth-password').value;
     // Simple password check (In real scenario, this would be more secure)
-    if (pass === 'DTSL#Admin#2026') {
+    if (pass === 'admin1234') {
         sessionStorage.setItem('inventory_auth', 'true');
         document.getElementById('login-overlay').style.display = 'none';
         fetchDevices();
