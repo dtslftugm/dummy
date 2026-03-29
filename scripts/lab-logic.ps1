@@ -103,6 +103,25 @@ elseif (Test-Path $tvPath32) {
     try { $teamviewerId = (Get-ItemProperty -Path $tvPath32 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
 }
 
+# --- GET RUSTDESK ID (via Logs) ---
+$rustdeskId = "N/A"
+$rdLogDir = "$env:APPDATA\RustDesk\log\"
+if (Test-Path $rdLogDir) {
+    # Scan logs for the 'Generated id' pattern
+    $latestRdLog = Get-ChildItem -Path $rdLogDir -Filter "rustdesk_*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($latestRdLog) {
+        $logLine = Get-Content $latestRdLog.FullName | Select-String -Pattern "Generated id (\d{9,10})" | Select-Object -Last 1
+        if ($logLine -and $logLine.Matches.Groups[1].Value) {
+            $rustdeskId = $logLine.Matches.Groups[1].Value
+        }
+    }
+}
+if ($rustdeskId -eq "N/A") {
+    # Fallback: check registry if available
+    $rdReg = Get-ItemProperty -Path "HKLM:\SOFTWARE\RustDesk" -Name "id" -ErrorAction SilentlyContinue 
+    if ($rdReg -and $rdReg.id) { $rustdeskId = $rdReg.id }
+}
+
 # --- GET INSTALLED SOFTWARE ---
 $paths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
 $swRaw = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null }
@@ -145,33 +164,23 @@ $activeUser = (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Inv
 if (!$activeUser) { $activeUser = $cs.UserName }
 
 # --- PREPARE PAYLOAD ---
-$payload = @{
+$payload = [ordered]@{
     path = "record-activity"; name = $hostname; status = $workStatus; operating_system_name = $os.Caption
     processor_type = $proc.Name.Trim(); number_of_processors = $cs.NumberOfProcessors; memory_total_size = "$([math]::Round($memSum, 2)) GB"
     memory_slot_count = $memArray.MemoryDevices; manufacturer = $cs.Manufacturer; model = $cs.Model
     serial_number = $bios.SerialNumber; uuid = $csp.UUID; bios_version = $bios.SMBIOSBIOSVersion
     bios_date = $bios.ReleaseDate.ToString("yyyy-MM-dd"); type = $systemType; ip_addresses = $ips
-    mac_addresses = $macs; last_user = $activeUser; anydesk_id = $anydeskId; teamviewer_id = $teamviewerId
+    mac_addresses = $macs; last_user = $activeUser; anydesk_id = $anydeskId; teamviewer_id = $teamviewerId; rustdesk_id = $rustdeskId
 }
 if ($sendSoftware) { $payload.softwareList = $swList }
 
-# --- SYNC (Dual-Sync) ---
-$pendingCommand = $null
-
-# 1. Local Gateway (primary — forwards heartbeat to GAS and relays pendingCommand)
+# 1. Google Sheets (Direct Sync)
 try {
-    $resLocal = Invoke-RestMethod -Uri $localGatewayUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json" -TimeoutSec 5
-    if ($resLocal.success -and $resLocal.pendingCommand) { $pendingCommand = $resLocal.pendingCommand }
+    $resGas = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
+    if ($resGas.success -and $resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
 }
-catch { Write-Host "Local Gateway Offline." -ForegroundColor Yellow }
-
-# 2. Google Sheets (fallback — hanya dipanggil jika gateway offline atau tidak ada command)
-if (-not $pendingCommand) {
-    try {
-        $resGas = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
-        if ($resGas.success -and $resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
-    }
-    catch { Write-Host "Google Sheets Offline." -ForegroundColor Red }
+catch { 
+    Write-Host "Google Sheets Offline / Network Error." -ForegroundColor Red 
 }
 
 
