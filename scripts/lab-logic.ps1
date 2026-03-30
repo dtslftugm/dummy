@@ -175,12 +175,20 @@ $payload = [ordered]@{
 if ($sendSoftware) { $payload.softwareList = $swList }
 
 # 1. Google Sheets (Direct Sync)
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 try {
     $resGas = Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 10) -ContentType "application/json"
-    if ($resGas.success -and $resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
+    if ($resGas.success) {
+        "[$timestamp] SYNC SUCCESS: Data sent to Google Sheets." | Out-File -FilePath $logPath -Append
+        if ($resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
+    } else {
+        "[$timestamp] GAS API ERROR: $($resGas.message)" | Out-File -FilePath $logPath -Append
+    }
 }
 catch { 
-    Write-Host "Google Sheets Offline / Network Error." -ForegroundColor Red 
+    $errMsg = $_.Exception.Message
+    Write-Host "Google Sheets Offline / Network Error: $errMsg" -ForegroundColor Red 
+    "[$timestamp] SYNC FAILED: $errMsg" | Out-File -FilePath $logPath -Append
 }
 
 
