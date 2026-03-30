@@ -1,7 +1,8 @@
 # ======================================================================
-# SCRIPT: lab-logic.ps1 (Update 2026-03-26 - Final Robust Edition)
-# FUNGSI: Heartbeat, Inventory, & Command Execution via Local Gateway/Cloud
+# SCRIPT: lab-logic.ps1 (Update 2026-03-30 - Enhanced Detection)
+# FUNGSI: Heartbeat, Inventory, & Command Execution via Cloud
 # ======================================================================
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 # =============================================================================
 # DAFTAR PERINTAH YANG TERSEDIA (pending_command di sheet Devices)
 # Gunakan pipe "|" untuk menggabungkan beberapa perintah sekaligus.
@@ -104,24 +105,39 @@ elseif (Test-Path $tvPath32) {
     try { $teamviewerId = (Get-ItemProperty -Path $tvPath32 -Name "ClientID" -ErrorAction SilentlyContinue).ClientID } catch {}
 }
 
-# --- GET RUSTDESK ID (via Logs) ---
+# --- GET RUSTDESK ID (Robust Detection) ---
 $rustdeskId = "N/A"
-$rdLogDir = "$env:APPDATA\RustDesk\log\"
-if (Test-Path $rdLogDir) {
-    # Scan logs for the 'Generated id' pattern
-    $latestRdLog = Get-ChildItem -Path $rdLogDir -Filter "rustdesk_*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if ($latestRdLog) {
-        # Efficiently read the last few lines to find the ID
-        $logLine = Get-Content $latestRdLog.FullName -Tail 500 | Select-String -Pattern "Generated id (\d{9,10})" | Select-Object -Last 1
-        if ($logLine -and $logLine.Matches.Groups[1].Value) {
-            $rustdeskId = $logLine.Matches.Groups[1].Value
+$logPaths = @(
+    "$env:APPDATA\RustDesk\log\",
+    "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\log\"
+)
+
+foreach ($logDir in $logPaths) {
+    if (Test-Path $logDir) {
+        $latestLog = Get-ChildItem -Path $logDir -Filter "rustdesk_*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($latestLog) {
+            # Check for multiple patterns in last 1000 lines
+            $logLines = Get-Content $latestLog.FullName -Tail 1000
+            foreach ($line in $logLines) {
+                if ($line -match "Generated id (\d{9,10})" -or $line -match "id: (\d{9,10})" -or $line -match "connected to .* \((\d{9,10})\)") {
+                    $rustdeskId = $matches[1]
+                    break
+                }
+            }
         }
     }
+    if ($rustdeskId -ne "N/A") { break }
 }
+
 if ($rustdeskId -eq "N/A") {
-    # Fallback: check registry if available
-    $rdReg = Get-ItemProperty -Path "HKLM:\SOFTWARE\RustDesk" -Name "id" -ErrorAction SilentlyContinue 
-    if ($rdReg -and $rdReg.id) { $rustdeskId = $rdReg.id }
+    # Fallback to Registry
+    $regPaths = @("HKLM:\SOFTWARE\RustDesk", "HKCU:\SOFTWARE\RustDesk")
+    foreach ($rp in $regPaths) {
+        if (Test-Path $rp) {
+            $rdReg = Get-ItemProperty -Path $rp -Name "id" -ErrorAction SilentlyContinue 
+            if ($rdReg -and $rdReg.id) { $rustdeskId = $rdReg.id; break }
+        }
+    }
 }
 
 # --- GET INSTALLED SOFTWARE ---
@@ -183,7 +199,8 @@ try {
     if ($resGas.success) {
         "[$timestamp] SYNC SUCCESS: Data sent to Google Sheets." | Out-File -FilePath $logPath -Append
         if ($resGas.pendingCommand) { $pendingCommand = $resGas.pendingCommand }
-    } else {
+    }
+    else {
         "[$timestamp] GAS API ERROR: $($resGas.message)" | Out-File -FilePath $logPath -Append
     }
 }
@@ -301,7 +318,8 @@ if ($pendingCommand) {
                 
                 if ((Get-Service WinRM).Status -eq "Running") {
                     $result = "VERIFIED SUCCESS: WinRM enabled, Running, & Policy set."
-                } else {
+                }
+                else {
                     $result = "FAILED VERIFICATION: WinRM service not Running."
                 }
             }
