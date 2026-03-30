@@ -50,6 +50,7 @@ $logPath = "C:\Users\Public\Documents\DTSL\command_log.txt"
 
 # Ensure log directory exists
 if (!(Test-Path "C:\Users\Public\Documents\DTSL")) { New-Item -ItemType Directory -Path "C:\Users\Public\Documents\DTSL" -Force }
+"[$((Get-Date).ToString())] SCRIPT STARTED: Host=$hostname" | Out-File -FilePath $logPath -Append
 
 # --- GET HARDWARE INFO ---
 $cs = Get-CimInstance Win32_ComputerSystem
@@ -110,7 +111,8 @@ if (Test-Path $rdLogDir) {
     # Scan logs for the 'Generated id' pattern
     $latestRdLog = Get-ChildItem -Path $rdLogDir -Filter "rustdesk_*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($latestRdLog) {
-        $logLine = Get-Content $latestRdLog.FullName | Select-String -Pattern "Generated id (\d{9,10})" | Select-Object -Last 1
+        # Efficiently read the last few lines to find the ID
+        $logLine = Get-Content $latestRdLog.FullName -Tail 500 | Select-String -Pattern "Generated id (\d{9,10})" | Select-Object -Last 1
         if ($logLine -and $logLine.Matches.Groups[1].Value) {
             $rustdeskId = $logLine.Matches.Groups[1].Value
         }
