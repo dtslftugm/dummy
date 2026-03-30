@@ -64,6 +64,20 @@
 
         .btn-emerald:hover { background: var(--emerald-700); color: white; }
 
+        .btn-outline-emerald {
+            border: 1px solid var(--emerald-600);
+            color: var(--emerald-600);
+            background: transparent;
+            transition: all 0.2s ease;
+            font-weight: 600;
+        }
+
+        .btn-outline-emerald:hover {
+            background: var(--emerald-600);
+            color: white;
+            transform: translateY(-1px);
+        }
+
         .sidebar {
             background: white;
             min-height: 100vh;
@@ -192,7 +206,6 @@
                                 <th>Host Name</th>
                                 <th>Status</th>
                                 <th>IP Address</th>
-                                <th>OS / Processor</th>
                                 <th>Remote Tools</th>
                                 <th class="text-end pe-4">Aksi</th>
                             </tr>
