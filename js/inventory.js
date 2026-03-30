@@ -73,11 +73,11 @@ function renderTable(devices) {
             <td class="fw-bold outfit" style="cursor:pointer" onclick="showDetail('${d.uuid}')">${d.name}</td>
             <td><span class="status-badge ${statusClass}">${statusText}</span></td>
             <td><code class="text-secondary small">${d.ip_addresses}</code></td>
-            <td><div class="small fw-semibold">${d.operating_system_name}</div><div class="extra-small text-muted">${d.processor_type}</div></td>
             <td>
                 <div class="d-flex gap-1">
                     ${d.rustdesk_id && d.rustdesk_id !== 'N/A' ? `<span class="badge bg-primary text-white">RD</span>` : ''}
                     ${d.anydesk_id && d.anydesk_id !== 'N/A' ? `<span class="badge bg-danger text-white">AD</span>` : ''}
+                    ${d.teamviewer_id && d.teamviewer_id !== 'N/A' ? `<span class="badge bg-info text-white">TV</span>` : ''}
                 </div>
             </td>
             <td class="text-end pe-4">
