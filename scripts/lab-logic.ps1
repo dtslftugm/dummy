@@ -334,27 +334,41 @@ if ($pendingCommand) {
                 }
             }
             elseif ($cmd -eq "restart") {
-                # Cek apakah ada user yang aktif login (Aggressive Detection)
-                $activeUser = (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Invoke-CimMethod -MethodName GetOwner -ErrorAction SilentlyContinue | Select-Object -First 1).User
-                if (!$activeUser) { $activeUser = (Get-CimInstance Win32_ComputerSystem).UserName }
-                
-                # Cek apakah ada aplikasi office/editor yang berjalan
-                $riskyProcs = @("WINWORD", "EXCEL", "POWERPNT", "notepad", "Code", "devenv", "OUTLOOK")
+                # 1. Cek aplikasi office/editor yang berjalan (Prioritas Keamanan Data)
+                $riskyProcs = @("WINWORD", "EXCEL", "POWERPNT", "notepad")
                 $openApps = Get-Process -ErrorAction SilentlyContinue | Where-Object { $riskyProcs -contains $_.ProcessName }
 
-                if ($activeUser -and $activeUser -ne "") {
-                    $result = "ABORTED: User '$activeUser' masih login aktif. Restart dibatalkan."
-                }
-                elseif ($openApps) {
+                # 2. Cek apakah sedang di Lock Screen / Login Screen (Universal)
+                $isLocked = Get-Process -Name "LogonUI" -ErrorAction SilentlyContinue
+
+                # 3. Cek user aktif di desktop
+                $activeUser = (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Invoke-CimMethod -MethodName GetOwner -ErrorAction SilentlyContinue | Select-Object -First 1).User
+                if (!$activeUser) { $activeUser = (Get-CimInstance Win32_ComputerSystem).UserName }
+
+                if ($openApps) {
                     $appList = ($openApps.ProcessName | Sort-Object -Unique) -join ", "
-                    $result = "ABORTED: Aplikasi '$appList' masih berjalan. Restart dibatalkan."
+                    $result = "ABORTED: Aplikasi '$appList' sedang berjalan. Restart dibatalkan."
                 }
-                else {
-                    # Kirim feedback partial ke GAS sebelum restart
-                    $partialResults = $allResults + "[$cmdIndex/$total] Restarting in 15 seconds..."
+                elseif ($isLocked) {
+                    # Kondisi: Layar terkunci, aman untuk restart meski ada user login
+                    $partialResults = $allResults + "[$cmdIndex/$total] PC Locked. Restarting in 15 seconds..."
                     $partialFb = @{ path = "command-feedback"; uuid = $csp.UUID; result = ($partialResults -join "`n") }
                     Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($partialFb | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
-                    shutdown /r /t 15 /c "DTSL Inventory Remote Restart"
+                    shutdown /r /t 15 /c "DTSL Inventory Remote Restart (Locked State)"
+                    $result = "Restarting in 15 seconds (Locked State)..."
+                    $allResults += "[$cmdIndex/$total] $result"
+                    Remove-Item -Path $queueFile -Force -ErrorAction SilentlyContinue
+                    break
+                }
+                elseif ($activeUser -and $activeUser -ne "") {
+                    $result = "ABORTED: User '$activeUser' masih aktif di Desktop. Restart dibatalkan."
+                }
+                else {
+                    # Tidak ada user aktif atau tidak di Lock Screen (IDLE total)
+                    $partialResults = $allResults + "[$cmdIndex/$total] PC Idle. Restarting in 15 seconds..."
+                    $partialFb = @{ path = "command-feedback"; uuid = $csp.UUID; result = ($partialResults -join "`n") }
+                    Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($partialFb | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
+                    shutdown /r /t 15 /c "DTSL Inventory Remote Restart (Idle State)"
                     $result = "Restarting in 15 seconds..."
                     $allResults += "[$cmdIndex/$total] $result"
                     Remove-Item -Path $queueFile -Force -ErrorAction SilentlyContinue
