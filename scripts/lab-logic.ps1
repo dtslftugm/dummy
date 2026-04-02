@@ -360,9 +360,6 @@ if ($pendingCommand) {
                     Remove-Item -Path $queueFile -Force -ErrorAction SilentlyContinue
                     break
                 }
-                elseif ($activeUser -and $activeUser -ne "") {
-                    $result = "ABORTED: User '$activeUser' masih aktif di Desktop. Restart dibatalkan."
-                }
                 else {
                     # Tidak ada user aktif atau tidak di Lock Screen (IDLE total)
                     $partialResults = $allResults + "[$cmdIndex/$total] PC Idle. Restarting in 15 seconds..."
