@@ -3,6 +3,51 @@
 # FUNGSI: Heartbeat, Inventory, & Command Execution via Cloud
 # ======================================================================
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# --- GLOBAL CONFIGURATION (Moved to top for early logging) ---
+$hostname = [System.Net.Dns]::GetHostName()
+$logPath = "C:\Users\Public\Documents\DTSL\command_log.txt"
+if (!(Test-Path "C:\Users\Public\Documents\DTSL")) { New-Item -ItemType Directory -Path "C:\Users\Public\Documents\DTSL" -Force }
+
+# --- DUAL-BOOT TIME FIX (UTC/Local Time Sync) ---
+# Mengatasi jam bergeser akibat dual-boot dengan Debian & sinkronisasi ke NTP UGM
+try {
+    $nowLog = (Get-Date).ToString()
+    
+    # 1. Pastikan Windows memahami BIOS dalam format UTC (Tidak butuh internet)
+    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\TimeZoneInformation"
+    Set-ItemProperty -Path $regPath -Name "RealTimeIsUniversal" -Value 1 -Type DWord -Force
+    "[$nowLog] [TIME] Registry RealTimeIsUniversal set to 1." | Out-File -FilePath $logPath -Append
+
+    # 2. Tunggu Jaringan (Max 60 detik) - Penting untuk Router Cisco yang lambat DHCP
+    "[$nowLog] [TIME] Menunggu koneksi jaringan (IP Address)..." | Out-File -FilePath $logPath -Append
+    $timeout = 60; $elapsed = 0
+    while ($elapsed -lt $timeout) {
+        $checkIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254*" }).IPAddress
+        if ($checkIp) { 
+            "[$((Get-Date).ToString())] [TIME] Jaringan terdeteksi: $checkIp" | Out-File -FilePath $logPath -Append
+            break 
+        }
+        Start-Sleep -Seconds 2; $elapsed += 2
+    }
+
+    # 3. Reset Total Konfigurasi Windows Time (Clean Slate)
+    Stop-Service w32time -ErrorAction SilentlyContinue
+    & w32tm /unregister; & w32tm /register
+    
+    # 4. Konfigurasi Server NTP UGM (ntp.ugm.ac.id)
+    & w32tm /config /manualpeerlist:"ntp.ugm.ac.id,0x1" /syncfromflags:manual /reliable:YES /update
+    
+    # 5. Jalankan kembali Service & Paksa Resync Seketika
+    Start-Service w32time
+    & w32tm /resync /force
+    
+    "[$((Get-Date).ToString())] [TIME] SUCCESS: Sinkronisasi ke ntp.ugm.ac.id berhasil." | Out-File -FilePath $logPath -Append
+}
+catch {
+    "[$((Get-Date).ToString())] [TIME] ERROR: Sinkronisasi waktu gagal: $($_.Exception.Message)" | Out-File -FilePath $logPath -Append
+}
+
 # =============================================================================
 # DAFTAR PERINTAH YANG TERSEDIA (pending_command di sheet Devices)
 # Gunakan pipe "|" untuk menggabungkan beberapa perintah sekaligus.
@@ -50,12 +95,9 @@
 # --- CONFIGURATION ---
 $gasUrl = "https://script.google.com/macros/s/AKfycbxG2MVcqRMqL-KX7MASHYNeOS-Py0Snf5PQeHuvgu7arITkGGbVgSAg6y8IZNjib3I9/exec"
 $localGatewayUrl = "http://10.47.106.9:5000/inventory"
-$hostname = [System.Net.Dns]::GetHostName()
 $hashFile = "C:\Users\Public\Documents\DTSL\dtsl_sw_hash.txt"
-$logPath = "C:\Users\Public\Documents\DTSL\command_log.txt"
 
 # Ensure log directory exists
-if (!(Test-Path "C:\Users\Public\Documents\DTSL")) { New-Item -ItemType Directory -Path "C:\Users\Public\Documents\DTSL" -Force }
 "[$((Get-Date).ToString())] SCRIPT STARTED: Host=$hostname" | Out-File -FilePath $logPath -Append
 
 # --- GET HARDWARE INFO ---
