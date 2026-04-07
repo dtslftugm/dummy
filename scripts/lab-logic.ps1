@@ -12,7 +12,7 @@ if (!(Test-Path "C:\Users\Public\Documents\DTSL")) { New-Item -ItemType Director
 # --- DUAL-BOOT TIME FIX (UTC/Local Time Sync) ---
 # Mengatasi jam bergeser akibat dual-boot dengan Debian & sinkronisasi ke NTP UGM
 try {
-    $nowLog = (Get-Date).ToString()
+    $nowLog = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     
     # 1. Pastikan Windows memahami BIOS dalam format UTC (Tidak butuh internet)
     $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\TimeZoneInformation"
@@ -25,7 +25,7 @@ try {
     while ($elapsed -lt $timeout) {
         $checkIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254*" }).IPAddress
         if ($checkIp) { 
-            "[$((Get-Date).ToString())] [TIME] Jaringan terdeteksi: $checkIp" | Out-File -FilePath $logPath -Append
+            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [TIME] Jaringan terdeteksi: $checkIp" | Out-File -FilePath $logPath -Append
             break 
         }
         Start-Sleep -Seconds 2; $elapsed += 2
@@ -42,10 +42,10 @@ try {
     Start-Service w32time
     & w32tm /resync /force
     
-    "[$((Get-Date).ToString())] [TIME] SUCCESS: Sinkronisasi ke ntp.ugm.ac.id berhasil." | Out-File -FilePath $logPath -Append
+    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [TIME] SUCCESS: Sinkronisasi ke ntp.ugm.ac.id berhasil." | Out-File -FilePath $logPath -Append
 }
 catch {
-    "[$((Get-Date).ToString())] [TIME] ERROR: Sinkronisasi waktu gagal: $($_.Exception.Message)" | Out-File -FilePath $logPath -Append
+    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [TIME] ERROR: Sinkronisasi waktu gagal: $($_.Exception.Message)" | Out-File -FilePath $logPath -Append
 }
 
 # =============================================================================
@@ -98,7 +98,7 @@ $localGatewayUrl = "http://10.47.106.9:5000/inventory"
 $hashFile = "C:\Users\Public\Documents\DTSL\dtsl_sw_hash.txt"
 
 # Ensure log directory exists
-"[$((Get-Date).ToString())] SCRIPT STARTED: Host=$hostname" | Out-File -FilePath $logPath -Append
+"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] SCRIPT STARTED: Host=$hostname" | Out-File -FilePath $logPath -Append
 
 # --- GET HARDWARE INFO ---
 $cs = Get-CimInstance Win32_ComputerSystem
