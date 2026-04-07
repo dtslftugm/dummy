@@ -336,9 +336,8 @@ if ($pendingCommand) {
                     # 1. Trigger: Saat Startup (Boot/Restart)
                     $t1 = New-ScheduledTaskTrigger -AtStartup
                     
-                    # 2. Trigger: Pengulangan (Interval Menit)
-                    $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $minutes)
-                    $t2.Repetition.Duration = [System.TimeSpan]::MaxValue # Indefinite repetition
+                    # 2. Trigger: Pengulangan (Interval Menit + Durasi Indefinite)
+                    $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $minutes) -RepetitionDuration ([TimeSpan]::FromDays(36500))
                     
                     try {
                         Set-ScheduledTask -TaskName $taskName -Trigger @($t1, $t2) -ErrorAction Stop
