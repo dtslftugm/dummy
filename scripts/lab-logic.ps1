@@ -4,6 +4,33 @@
 # ======================================================================
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# --- USER ACTIVITY DETECTION HELPER ---
+# Mengambil data terakhir kali mouse/keyboard digerakkan (User32.dll)
+if (-not ([System.Management.Automation.PSTypeName]"UserInput").Type) {
+    try {
+        Add-Type @'
+        using System;
+        using System.Runtime.InteropServices;
+        public class UserInput {
+            [DllImport("user32.dll")]
+            public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+            public struct LASTINPUTINFO {
+                public uint cbSize;
+                public uint dwTime;
+            }
+            public static long GetIdleTime() {
+                LASTINPUTINFO lii = new LASTINPUTINFO();
+                lii.cbSize = (uint)Marshal.SizeOf(lii);
+                if (GetLastInputInfo(ref lii)) {
+                    return ((uint)Environment.TickCount - lii.dwTime);
+                }
+                return 0;
+            }
+        }
+'@
+    } catch {}
+}
+
 # --- GLOBAL CONFIGURATION (Moved to top for early logging) ---
 $hostname = [System.Net.Dns]::GetHostName()
 $logPath = "C:\Users\Public\Documents\DTSL\command_log.txt"
@@ -78,10 +105,17 @@ catch {
 #
 #   restart
 #       Merestart komputer secara remote (delay 15 detik).
-#       Hanya dieksekusi bila komputer IDLE (tidak ada user login aktif
-#       dan tidak ada aplikasi office/editor yang berjalan).
+#       OTOMATIS DIBATALKAN jika:
+#       1. Ada aplikasi berisiko (Word, Excel, dsb) terbuka.
+#       2. Ada aktivitas user (Mouse/Keyboard) dalam 5 menit terakhir.
 #       SELALU tempatkan di posisi PALING AKHIR dalam antrian.
 #       Contoh: rename-computer:FT-DTSL-PC-01|restart
+#
+#   restart-force
+#       Memaksa restart komputer SEGERA (delay 15 detik).
+#       MENGABAIKAN semua pengecekan (User aktif/Apps terbuka).
+#       Gunakan hanya untuk kondisi darurat (PC Hang/Sesi macet).
+#       Contoh: restart-force
 #
 #   set-schedule:<menit>
 #       Mengubah frekuensi sinkronisasi DTSL-Sync secara remote.
@@ -403,6 +437,17 @@ if ($pendingCommand) {
                     $result = "ERROR: Nama komputer '$newName' tidak valid (maks 15 karakter, alfanumerik dan tanda hubung)."
                 }
             }
+            elseif ($cmd -eq "restart-force") {
+                # Force Restart tanpa pandang bulu
+                $partialResults = $allResults + "[$cmdIndex/$total] FORCING RESTART (Emergency) in 15 seconds..."
+                $partialFb = @{ path = "command-feedback"; uuid = $csp.UUID; result = ($partialResults -join "`n") }
+                Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($partialFb | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
+                shutdown /r /f /t 15 /c "DTSL Inventory FORCED Remote Restart"
+                $result = "FORCED SUCCESS: PC is restarting (Emergency)."
+                $allResults += "[$cmdIndex/$total] $result"
+                Remove-Item -Path $queueFile -Force -ErrorAction SilentlyContinue
+                break
+            }
             elseif ($cmd -eq "restart") {
                 # 1. Cek aplikasi office/editor yang berjalan (Prioritas Keamanan Data)
                 $riskyProcs = @("WINWORD", "EXCEL", "POWERPNT", "notepad")
@@ -411,35 +456,27 @@ if ($pendingCommand) {
                 # 2. Cek apakah sedang di Lock Screen / Login Screen (Universal)
                 $isLocked = Get-Process -Name "LogonUI" -ErrorAction SilentlyContinue
 
-                # 3. Cek user aktif di desktop
-                $activeUser = (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" | Invoke-CimMethod -MethodName GetOwner -ErrorAction SilentlyContinue | Select-Object -First 1).User
-                if (!$activeUser) { $activeUser = (Get-CimInstance Win32_ComputerSystem).UserName }
+                # 3. Cek aktivitas user (Idle Detection)
+                # IdleTime dalam milidetik. 300.000 ms = 5 menit.
+                $idleTimeMs = [UserInput]::GetIdleTime()
+                $isUserActive = ($idleTimeMs -lt 300000)
 
                 if ($openApps) {
                     $appList = ($openApps.ProcessName | Sort-Object -Unique) -join ", "
-                    $result = "ABORTED: Aplikasi '$appList' sedang berjalan. Restart dibatalkan."
+                    $result = "ABORTED: Aplikasi '$appList' sedang berjalan. Restart dibatalkan demi keamanan data."
                 }
-                elseif ($isLocked) {
-                    # Kondisi: Layar terkunci, aman untuk restart meski ada user login
-                    $partialResults = $allResults + "[$cmdIndex/$total] PC Locked. Restarting in 15 seconds..."
-                    $partialFb = @{ path = "command-feedback"; uuid = $csp.UUID; result = ($partialResults -join "`n") }
-                    Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($partialFb | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
-                    shutdown /r /t 15 /c "DTSL Inventory Remote Restart (Locked State)"
-                    $result = "Restarting in 15 seconds (Locked State)..."
-                    $allResults += "[$cmdIndex/$total] $result"
-                    Remove-Item -Path $queueFile -Force -ErrorAction SilentlyContinue
-                    break
-                }
-                elseif ($activeUser -and $activeUser -ne "") {
-                    $result = "ABORTED: User '$activeUser' masih aktif di Desktop. Restart dibatalkan."
+                elseif (!$isLocked -and $isUserActive) {
+                    $idleMin = [math]::Round($idleTimeMs / 60000, 1)
+                    $result = "ABORTED: User terdeteksi AKTIF (Aktivitas terakhir: $idleMin menit lalu). Restart dibatalkan."
                 }
                 else {
-                    # Tidak ada user aktif atau tidak di Lock Screen (IDLE total)
-                    $partialResults = $allResults + "[$cmdIndex/$total] PC Idle. Restarting in 15 seconds..."
+                    # Kondisi aman (PC Locked atau sudah Idle > 5 menit tanpa aplikasi risiko)
+                    $msg = if ($isLocked) { "PC Locked. Restarting in 15 seconds..." } else { "PC Idle. Restarting in 15 seconds..." }
+                    $partialResults = $allResults + "[$cmdIndex/$total] $msg"
                     $partialFb = @{ path = "command-feedback"; uuid = $csp.UUID; result = ($partialResults -join "`n") }
                     Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($partialFb | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
-                    shutdown /r /t 15 /c "DTSL Inventory Remote Restart (Idle State)"
-                    $result = "Restarting in 15 seconds..."
+                    shutdown /r /t 15 /c "DTSL Inventory Remote Restart (Safe State)"
+                    $result = "VERIFIED SUCCESS: Restart triggered."
                     $allResults += "[$cmdIndex/$total] $result"
                     Remove-Item -Path $queueFile -Force -ErrorAction SilentlyContinue
                     break
