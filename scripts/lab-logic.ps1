@@ -38,6 +38,11 @@
 #       SELALU tempatkan di posisi PALING AKHIR dalam antrian.
 #       Contoh: rename-computer:FT-DTSL-PC-01|restart
 #
+#   set-schedule:<menit>
+#       Mengubah frekuensi sinkronisasi DTSL-Sync secara remote.
+#       Otomatis menambahkan trigger "At Startup" (jalan saat boot).
+#       Contoh: set-schedule:30 (jalan tiap 30 menit & saat boot).
+#
 # FEEDBACK: Setiap perintah menghasilkan status bernomor [N/M] di kolom
 #   last_command_result pada sheet Devices.
 # =============================================================================
@@ -323,6 +328,30 @@ if ($pendingCommand) {
                     $result = "FAILED VERIFICATION: WinRM service not Running."
                 }
             }
+            elseif ($cmd -match "set-schedule:(\d+)") {
+                $minutes = [int]$matches[1]
+                if ($minutes -ge 1 -and $minutes -le 1440) {
+                    $taskName = "DTSL-Sync"
+                    
+                    # 1. Trigger: Saat Startup (Boot/Restart)
+                    $t1 = New-ScheduledTaskTrigger -AtStartup
+                    
+                    # 2. Trigger: Pengulangan (Interval Menit)
+                    $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $minutes)
+                    $t2.Repetition.Duration = [System.TimeSpan]::MaxValue # Indefinite repetition
+                    
+                    try {
+                        Set-ScheduledTask -TaskName $taskName -Trigger @($t1, $t2) -ErrorAction Stop
+                        $result = "VERIFIED SUCCESS: Task '$taskName' updated to run every $minutes mins + At Startup."
+                    }
+                    catch {
+                        $result = "FAILED: Task '$taskName' tidak ditemukan atau gagal diupdate. Error: $($_.Exception.Message)"
+                    }
+                }
+                else {
+                    $result = "ERROR: Menit harus antara 1 s/d 1440 (24 jam)."
+                }
+            }
             elseif ($cmd -match "rename-computer:(.*)") {
                 $newName = $matches[1].Trim() -replace '[^a-zA-Z0-9\-]', ''
                 if ($newName.Length -gt 0 -and $newName.Length -le 15) {
@@ -359,6 +388,9 @@ if ($pendingCommand) {
                     $allResults += "[$cmdIndex/$total] $result"
                     Remove-Item -Path $queueFile -Force -ErrorAction SilentlyContinue
                     break
+                }
+                elseif ($activeUser -and $activeUser -ne "") {
+                    $result = "ABORTED: User '$activeUser' masih aktif di Desktop. Restart dibatalkan."
                 }
                 else {
                     # Tidak ada user aktif atau tidak di Lock Screen (IDLE total)
