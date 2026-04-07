@@ -379,7 +379,7 @@ if ($pendingCommand) {
                     $t1 = New-ScheduledTaskTrigger -AtStartup
                     
                     # 2. Trigger: Pengulangan (Interval Menit + Durasi Indefinite)
-                    $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $minutes) -RepetitionDuration ([TimeSpan]::FromDays(36500))
+                    $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $minutes) -RepetitionDuration ([TimeSpan]::FromDays(9999))
                     
                     try {
                         Set-ScheduledTask -TaskName $taskName -Trigger @($t1, $t2) -ErrorAction Stop
