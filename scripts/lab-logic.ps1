@@ -14,6 +14,10 @@ if (-not ([System.Management.Automation.PSTypeName]"UserInput").Type) {
         public class UserInput {
             [DllImport("user32.dll")]
             public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+            
+            [DllImport("user32.dll")]
+            public static extern void mouse_event(int dwFlags, int dx, int dy, int cButtons, int dwExtraInfo);
+            
             public struct LASTINPUTINFO {
                 public uint cbSize;
                 public uint dwTime;
@@ -75,6 +79,25 @@ catch {
     "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [TIME] ERROR: Sinkronisasi waktu gagal: $($_.Exception.Message)" | Out-File -FilePath $logPath -Append
 }
 
+# --- SELF-HEAL TASK SCHEDULER (Automated Repair) ---
+# Memastikan pemicu At Startup dan setting baterai tetap ada di komputer lama
+try {
+    $taskName = "DTSL-Sync"
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($task) {
+        $hasStartup = $task.Triggers | Where-Object { $_.GetType().Name -match "BootTrigger" }
+        if (-not $hasStartup) {
+            $t1 = New-ScheduledTaskTrigger -AtStartup
+            $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration ([TimeSpan]::FromDays(9999))
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+            Register-ScheduledTask -TaskName $taskName -Trigger @($t1, $t2) -Action $task.Actions -Settings $settings -User "SYSTEM" -Force
+            "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [MAINTENANCE] Fixed Task Scheduler: AtStartup trigger added automatically." | Out-File -FilePath $logPath -Append
+        }
+    }
+} catch {
+    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [MAINTENANCE] Failed to self-heal Task Scheduler: $($_.Exception.Message)" | Out-File -FilePath $logPath -Append
+}
+
 # =============================================================================
 # DAFTAR PERINTAH YANG TERSEDIA (pending_command di sheet Devices)
 # Gunakan pipe "|" untuk menggabungkan beberapa perintah sekaligus.
@@ -121,6 +144,14 @@ catch {
 #       Mengubah frekuensi sinkronisasi DTSL-Sync secara remote.
 #       Otomatis menambahkan trigger "At Startup" (jalan saat boot).
 #       Contoh: set-schedule:30 (jalan tiap 30 menit & saat boot).
+#
+#   wake-monitor
+#       Membangunkan monitor yang sedang dalam kondisi sleep/power-save.
+#       (Hanya bekerja jika PC dalam kondisi menyala/ON).
+#
+#   reset-sw-inventory
+#       Menghapus file cache hash software lokals, memaksa sinkronisasi
+#       ulang daftar software lengkap ke Google Sheets.
 #
 # FEEDBACK: Setiap perintah menghasilkan status bernomor [N/M] di kolom
 #   last_command_result pada sheet Devices.
@@ -226,8 +257,8 @@ $paths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:
 $swRaw = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null }
 $swList = $swRaw | Select-Object @{n = 'name'; e = { $_.DisplayName } }, @{n = 'version'; e = { $_.DisplayVersion } }, @{n = 'vendor'; e = { $_.Publisher } }, @{n = 'installDate'; e = { $_.InstallDate } }
 
-# Hash sync check
-$currentHash = ($swList | ConvertTo-Json | Out-String).GetHashCode().ToString()
+# Hash sync check (Mixed with hostname to re-sync if renamed)
+$currentHash = ($hostname + ($swList | ConvertTo-Json | Out-String)).GetHashCode().ToString()
 $oldHash = if (Test-Path $hashFile) { Get-Content $hashFile } else { "" }
 $sendSoftware = if ($currentHash -ne $oldHash) { $true } else { $false }
 if ($sendSoftware) { Set-Content -Path $hashFile -Value $currentHash }
@@ -409,22 +440,68 @@ if ($pendingCommand) {
                 if ($minutes -ge 1 -and $minutes -le 1440) {
                     $taskName = "DTSL-Sync"
                     
-                    # 1. Trigger: Saat Startup (Boot/Restart)
-                    $t1 = New-ScheduledTaskTrigger -AtStartup
-                    
-                    # 2. Trigger: Pengulangan (Interval Menit + Durasi Indefinite)
-                    $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $minutes) -RepetitionDuration ([TimeSpan]::FromDays(9999))
-                    
                     try {
-                        Set-ScheduledTask -TaskName $taskName -Trigger @($t1, $t2) -ErrorAction Stop
-                        $result = "VERIFIED SUCCESS: Task '$taskName' updated to run every $minutes mins + At Startup."
+                        # Ambil Task dan Action yang sudah ada agar tidak perlu mendefinisikan ulang path skrip
+                        $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+                        
+                        # 1. Trigger: Saat Startup (Boot/Restart)
+                        $t1 = New-ScheduledTaskTrigger -AtStartup
+                        
+                        # 2. Trigger: Pengulangan (Interval Menit + Durasi Indefinite)
+                        $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $minutes) -RepetitionDuration ([TimeSpan]::FromDays(9999))
+                        
+                        # 3. Settings: Pastikan tetap bisa jalan saat baterai
+                        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+                        
+                        # 4. Registrasi Ulang (Clean Slate)
+                        Register-ScheduledTask -TaskName $taskName -Trigger @($t1, $t2) -Action $existingTask.Actions -Settings $settings -User "SYSTEM" -Force
+                        
+                        $result = "VERIFIED SUCCESS: Task '$taskName' re-registered with dual-triggers (Every $minutes mins + At Startup)."
                     }
                     catch {
-                        $result = "FAILED: Task '$taskName' tidak ditemukan atau gagal diupdate. Error: $($_.Exception.Message)"
+                        $result = "FAILED: Gagal re-registrasi task '$taskName'. Error: $($_.Exception.Message)"
                     }
                 }
                 else {
                     $result = "ERROR: Menit harus antara 1 s/d 1440 (24 jam)."
+                }
+            }
+            elseif ($cmd -eq "wake-monitor") {
+                # Membangunkan layar menggunakan Windows Message SC_MONITORPOWER
+                # wParam: -1 = ON, 2 = OFF, 1 = Standby
+                $partialResults = $allResults + "[$cmdIndex/$total] Sending wake signal to monitor..."
+                $partialFb = @{ path = "command-feedback"; uuid = $csp.UUID; result = ($partialResults -join "`n") }
+                Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($partialFb | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
+
+                try {
+                    # Inject SendMessage API jika belum ada
+                    Add-Type -TypeDefinition @'
+                    using System;
+                    using System.Runtime.InteropServices;
+                    public class MonitorAPI {
+                        [DllImport("user32.dll")]
+                        public static extern int SendMessage(int hWnd, int hMsg, int wParam, int lParam);
+                    }
+'@ -ErrorAction SilentlyContinue
+                    
+                    # HWND_BROADCAST (0xffff), WM_SYSCOMMAND (0x0112), SC_MONITORPOWER (0xf170), ON (-1)
+                    [MonitorAPI]::SendMessage(0xffff, 0x0112, 0xf170, -1)
+                    
+                    # Fallback: Emulasi pergerakan mouse 1px (via UserInput class)
+                    [UserInput]::mouse_event(0x0001, 1, 1, 0, 0)
+                    [UserInput]::mouse_event(0x0001, -1, -1, 0, 0)
+                    
+                    $result = "VERIFIED SUCCESS: Wake signal sent to display (System & Mouse Jiggle)."
+                } catch {
+                    $result = "FAILED: Gagal mengirim sinyal bangun layar. Error: $($_.Exception.Message)"
+                }
+            }
+            elseif ($cmd -eq "reset-sw-inventory") {
+                if (Test-Path $hashFile) {
+                    Remove-Item -Path $hashFile -Force
+                    $result = "VERIFIED SUCCESS: Software hash cleared. Full inventory will be sent on next cycle."
+                } else {
+                    $result = "INFO: File hash tidak ditemukan, inventory akan dikirim otomatis."
                 }
             }
             elseif ($cmd -match "rename-computer:(.*)") {
