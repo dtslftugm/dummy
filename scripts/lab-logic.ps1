@@ -470,37 +470,35 @@ if ($pendingCommand) {
                 }
             }
             elseif ($cmd -eq "wake-monitor") {
-                # Membangunkan layar menggunakan broadcast message (Menembus Session 0 Isolation)
-                $partialResults = $allResults + "[$cmdIndex/$total] Sending cross-session wake signal..."
+                # Membangunkan layar menggunakan kombinasi Hardware-Level & Driver-Level
+                $partialResults = $allResults + "[$cmdIndex/$total] Sending hardware-level wake signals..."
                 $partialFb = @{ path = "command-feedback"; uuid = $csp.UUID; result = ($partialResults -join "`n") }
                 Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($partialFb | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
 
                 try {
-                    # 1. BroadCast Message: Metode paling ampuh menembus isolasi sesi SYSTEM
-                    # Ini akan memunculkan popup 1 detik di semua monitor yang aktif
-                    & msg * /time:1 "DTSL Remote Management: Waking up display..."
-                    
-                    # 2. Monitor Power Signal (WinAPI)
-                    Add-Type -TypeDefinition @'
-                    using System;
-                    using System.Runtime.InteropServices;
-                    public class MonitorAPI {
-                        [DllImport("user32.dll")]
-                        public static extern int SendMessage(int hWnd, int hMsg, int wParam, int lParam);
+                    # 1. Driver-Level Wake (WMI)
+                    # Mengirim perintah kecerahan langsung ke driver monitor
+                    Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorMethods -ErrorAction SilentlyContinue | ForEach-Object { 
+                        Invoke-CimMethod -InputObject $_ -MethodName WmiSetBrightness -Arguments @{Brightness=100; Timeout=0} -ErrorAction SilentlyContinue
                     }
-'@ -ErrorAction SilentlyContinue
-                    [MonitorAPI]::SendMessage(0xffff, 0x0112, 0xf170, -1)
                     
-                    # 3. Fallback: Mouse & Keyboard Jiggle
+                    # 2. Hardware-Level Wake (NumLock Triple Toggle)
+                    # Meniru persis aktivitas fisik yang mambangunkan monitor. 
+                    # VK_NUMLOCK = 0x90. Dilakukan 6 kali (3x On/Off)
                     if (([System.Management.Automation.PSTypeName]"UserInput").Type) {
-                        [UserInput]::mouse_event(0x0001, 1, 1, 0, 0)
-                        [UserInput]::mouse_event(0x0001, -1, -1, 0, 0)
-                        [UserInput]::keybd_event(0x10, 0, 0, 0); [UserInput]::keybd_event(0x10, 0, 2, 0) # Shift
+                        for ($i=0; $i -lt 6; $i++) {
+                            [UserInput]::keybd_event(0x90, 0, 0, 0) # Press
+                            [UserInput]::keybd_event(0x90, 0, 2, 0) # Release
+                            Start-Sleep -Milliseconds 100
+                        }
                     }
+
+                    # 3. Session-Level Wake (Fallback)
+                    & msg * /time:1 "DTSL Remote Management: Display Wake Signal sent."
                     
-                    $result = "VERIFIED SUCCESS: Wake signals (MSG + API + Jiggle) broadcasted to all sessions."
+                    $result = "VERIFIED SUCCESS: Wake signals (WMI + Triple NumLock + MSG) sent."
                 } catch {
-                    $result = "FAILED: Gagal mengirim sinyal bangun layar. Error: $($_.Exception.Message)"
+                    $result = "FAILED: Gagal mengirim sinyal hardware wake. Error: $($_.Exception.Message)"
                 }
             }
             elseif ($cmd -eq "reset-sw-inventory") {
