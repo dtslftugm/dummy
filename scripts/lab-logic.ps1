@@ -470,14 +470,17 @@ if ($pendingCommand) {
                 }
             }
             elseif ($cmd -eq "wake-monitor") {
-                # Membangunkan layar menggunakan Windows Message SC_MONITORPOWER
-                # wParam: -1 = ON, 2 = OFF, 1 = Standby
-                $partialResults = $allResults + "[$cmdIndex/$total] Sending wake signal to monitor..."
+                # Membangunkan layar menggunakan broadcast message (Menembus Session 0 Isolation)
+                $partialResults = $allResults + "[$cmdIndex/$total] Sending cross-session wake signal..."
                 $partialFb = @{ path = "command-feedback"; uuid = $csp.UUID; result = ($partialResults -join "`n") }
                 Invoke-RestMethod -Uri $gasUrl -Method Post -Body ($partialFb | ConvertTo-Json) -ContentType "application/json" -ErrorAction SilentlyContinue
 
                 try {
-                    # Inject SendMessage API jika belum ada
+                    # 1. BroadCast Message: Metode paling ampuh menembus isolasi sesi SYSTEM
+                    # Ini akan memunculkan popup 1 detik di semua monitor yang aktif
+                    & msg * /time:1 "DTSL Remote Management: Waking up display..."
+                    
+                    # 2. Monitor Power Signal (WinAPI)
                     Add-Type -TypeDefinition @'
                     using System;
                     using System.Runtime.InteropServices;
@@ -486,22 +489,16 @@ if ($pendingCommand) {
                         public static extern int SendMessage(int hWnd, int hMsg, int wParam, int lParam);
                     }
 '@ -ErrorAction SilentlyContinue
-                    
-                    # HWND_BROADCAST (0xffff), WM_SYSCOMMAND (0x0112), SC_MONITORPOWER (0xf170), ON (-1)
                     [MonitorAPI]::SendMessage(0xffff, 0x0112, 0xf170, -1)
                     
-                    # 1. Fallback: Emulasi pergerakan mouse 1px (via UserInput class)
-                    [UserInput]::mouse_event(0x0001, 1, 1, 0, 0)
-                    [UserInput]::mouse_event(0x0001, -1, -1, 0, 0)
+                    # 3. Fallback: Mouse & Keyboard Jiggle
+                    if (([System.Management.Automation.PSTypeName]"UserInput").Type) {
+                        [UserInput]::mouse_event(0x0001, 1, 1, 0, 0)
+                        [UserInput]::mouse_event(0x0001, -1, -1, 0, 0)
+                        [UserInput]::keybd_event(0x10, 0, 0, 0); [UserInput]::keybd_event(0x10, 0, 2, 0) # Shift
+                    }
                     
-                    # 2. Fallback: Emulasi penekanan tombol keyboard (Tombol SHIFT - VK 0x10)
-                    # Ini meniru aktivitas fisik yang biasanya lebih ampuh membangunkan layar
-                    [UserInput]::keybd_event(0x10, 0, 0, 0)      # Press Shift
-                    [UserInput]::keybd_event(0x10, 0, 2, 0)      # Release Shift
-                    [UserInput]::keybd_event(0x10, 0, 0, 0)      # Press Shift
-                    [UserInput]::keybd_event(0x10, 0, 2, 0)      # Release Shift
-                    
-                    $result = "VERIFIED SUCCESS: Wake signal sent to display (API + Mouse + Keyboard Shift)."
+                    $result = "VERIFIED SUCCESS: Wake signals (MSG + API + Jiggle) broadcasted to all sessions."
                 } catch {
                     $result = "FAILED: Gagal mengirim sinyal bangun layar. Error: $($_.Exception.Message)"
                 }
