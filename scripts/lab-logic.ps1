@@ -444,8 +444,9 @@ if ($pendingCommand) {
                     $taskName = "DTSL-Sync"
                     
                     try {
-                        # Ambil Task dan Action yang sudah ada agar tidak perlu mendefinisikan ulang path skrip
-                        $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+                        # Gunakan pipa (Where-Object) untuk pencarian yang lebih stabil daripada parameter -TaskName langsung
+                        $existingTask = Get-ScheduledTask | Where-Object { $_.TaskName -eq $taskName } | Select-Object -First 1
+                        if (!$existingTask) { throw "Task '$taskName' tidak ditemukan (Pencarian Gagal)." }
                         
                         # 1. Trigger: Saat Startup (Boot/Restart)
                         $t1 = New-ScheduledTaskTrigger -AtStartup
