@@ -442,32 +442,31 @@ if ($pendingCommand) {
                 $minutes = [int]$matches[1]
                 if ($minutes -ge 1 -and $minutes -le 1440) {
                     $taskName = "DTSL-Sync"
+                    $scriptPath = "C:\Users\Public\Documents\DTSL\dtsl-sync.ps1"
                     
                     try {
-                        # Gunakan pipa (Where-Object) untuk pencarian yang lebih stabil daripada parameter -TaskName langsung
-                        $existingTask = Get-ScheduledTask | Where-Object { $_.TaskName -eq $taskName } | Select-Object -First 1
-                        if (!$existingTask) { throw "Task '$taskName' tidak ditemukan (Pencarian Gagal)." }
+                        # 1. Definisikan Action secara eksplisit (Fresh Start)
+                        $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`""
                         
-                        # 1. Trigger: Saat Startup (Boot/Restart)
+                        # 2. Trigger: Saat Startup (Boot) + Repetition (Interval Menit)
                         $t1 = New-ScheduledTaskTrigger -AtStartup
-                        
-                        # 2. Trigger: Pengulangan (Interval Menit + Durasi Indefinite)
                         $t2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $minutes) -RepetitionDuration ([TimeSpan]::FromDays(9999))
                         
-                        # 3. Settings: Pastikan tetap bisa jalan saat baterai
+                        # 3. Settings: Izinkan jalan di baterai
                         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
                         
-                        # 4. Registrasi Ulang (Clean Slate)
-                        Register-ScheduledTask -TaskName $taskName -Trigger @($t1, $t2) -Action $existingTask.Actions -Settings $settings -User "SYSTEM" -Force
+                        # 4. Registrasi Ulang (Overwrite Total)
+                        # Kita tidak butuh Get-ScheduledTask lagi, langsung timpa agar stabil di semua komputer.
+                        Register-ScheduledTask -TaskName $taskName -Trigger @($t1, $t2) -Action $action -Settings $settings -User "SYSTEM" -Force
                         
-                        $result = "VERIFIED SUCCESS: Task '$taskName' re-registered with dual-triggers (Every $minutes mins + At Startup)."
+                        $result = "VERIFIED SUCCESS: Task '$taskName' re-registered (Every $minutes mins + At Startup)."
                     }
                     catch {
-                        $result = "FAILED: Gagal re-registrasi task '$taskName'. Error: $($_.Exception.Message)"
+                        $result = "FAILED: Gagal regenerasi task '$taskName'. Error: $($_.Exception.Message)"
                     }
                 }
                 else {
-                    $result = "ERROR: Menit harus antara 1 s/d 1440 (24 jam)."
+                    $result = "ERROR: Menit harus antara 1 s/d 1440."
                 }
             }
             elseif ($cmd -eq "wake-monitor") {
